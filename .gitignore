@@ -3,3 +3,8 @@ build/
 
 *~
 *.swp
+
+examples/sample_images/*
+examples/*.png
+examples/*.jpg
+examples/*.ppm
