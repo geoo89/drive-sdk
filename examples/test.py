@@ -1,3 +1,5 @@
+#!/bin/python
+
 import numpy as np
 import cv2
  
@@ -15,4 +17,13 @@ ret,thresh = cv2.threshold(imgray,32,255,0)
 contours, hierarchy = cv2.findContours(thresh,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
 cv2.drawContours(im,contours,-1,(0,255,0),3)
 print len(contours)
+print contours
+print hierarchy
+for i in range(len(hierarchy[0])):
+    # has a child:
+    if hierarchy[0][i][2] >= 0:
+        M = cv2.moments(contours[i])
+        centroid_x = int(M['m10']/M['m00'])
+        centroid_y = int(M['m01']/M['m00'])
+        print (centroid_x, centroid_y)
 cv2.imwrite('out.jpg', im)
