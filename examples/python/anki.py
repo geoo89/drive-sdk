@@ -111,7 +111,7 @@ if __name__ == "__main__":
     KATAL = "D8:64:85:29:01:C0"
     KOURAI = "EB:0D:D8:05:CA:1A"
     
-    car = Car(BOSON)
+    car = Car(KOURAI)
     if not car:
         print "Couldn't create Car object"
         raise SystemExit
@@ -122,9 +122,9 @@ if __name__ == "__main__":
         raise SystemExit
     
     status = car.set_speed(1200, 5000)
-    if not status:
-        print "Couldn't set speed, code",  status
-        raise SystemExit
+#    if not status:
+#        print "Couldn't set speed, code",  status
+#        raise SystemExit
 
     sleep(2)
     status = car.change_lane(100, 1500, 1000)
