@@ -24,18 +24,18 @@ for i in range(10):
         # imgray = cv2.medianBlur(imgray,5)
         ret,thresh = cv2.threshold(imgray,96,255,0)
         ret, contours, hierarchy = cv2.findContours(thresh,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
-	#print contours
+    #print contours
         #cv2.imwrite('outg%s.jpg' % i, imgray)
         cv2.imwrite('outt%s.jpg' % i, thresh)
         cv2.drawContours(im,contours,-1,(0,255,0),2)
         cv2.imwrite('outc%s.jpg' % i, im)
-	for i in range(len(hierarchy[0])):
-	    # has a child:
-	    if hierarchy[0][i][2] >= 0:
-		M = cv2.moments(contours[i])
-		centroid_x = int(M['m10']/M['m00'])
-		centroid_y = int(M['m01']/M['m00'])
-		print (centroid_x, centroid_y)
+        for i in range(len(hierarchy[0])):
+            # has a child:
+            if hierarchy[0][i][2] >= 0:
+                M = cv2.moments(contours[i])
+                centroid_x = int(M['m10']/M['m00'])
+                centroid_y = int(M['m01']/M['m00'])
+                print (centroid_x, centroid_y)
         print hierarchy
         #cv2.imwrite('out%s.jpg' % i, im)
 
