@@ -19,6 +19,7 @@ cv2.drawContours(im,contours,-1,(0,255,0),3)
 print len(contours)
 print contours
 print hierarchy
+
 for i in range(len(hierarchy[0])):
     # has a child:
     if hierarchy[0][i][2] >= 0:

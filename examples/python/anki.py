@@ -88,8 +88,10 @@ if __name__ == "__main__":
     BOSON = "D9:81:41:5C:D4:31"
     KATAL = "D8:64:85:29:01:C0"
     KOURAI = "EB:0D:D8:05:CA:1A"
+    NUKE = "C5:34:5D:26:BE:53"
+    HADION = "D4:48:49:03:98:95"
 
-    car = Car(RHO)
+    car = Car(HADION)
     if not car:
         print "Couldn't create Car object"
         raise SystemExit
