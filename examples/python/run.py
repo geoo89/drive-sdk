@@ -1,5 +1,10 @@
 from anki import *
 
+import sysv_ipc
+import numpy as np
+import cv2
+from time import sleep
+
 RHO = "E6:D8:52:F1:D9:43"
 BOSON = "D9:81:41:5C:D4:31"
 KATAL = "D8:64:85:29:01:C0"
@@ -23,8 +28,6 @@ if status:
 # attach to shared memory with key 192012003
 S=sysv_ipc.SharedMemory(key=192012003)
 
-np.median(np.array([im1, im2, im3]), 0, out=med)
-
 ims = []
 for i in range(3):
     # read contents into numpy array
@@ -35,12 +38,12 @@ med = np.array(ims[0])
 np.median(np.array(ims), 0, out=med)
 cv2.imwrite('outmed.jpg', med)
 
-#while(True):
-for _ in range(100)
+#while(True): 
+for _ in range(100):
     car.set_speed(1200, 5000)
     # read contents into numpy array
     cur_im = np.frombuffer(S.read(1696*720*3),dtype=np.uint8).reshape(720,1696,3)
-    cur_im = cv2.cvtColor(im2,cv2.COLOR_BGR2RGB)
+    cur_im = cv2.cvtColor(cur_im,cv2.COLOR_BGR2RGB)
     im = cv2.subtract(cur_im, med)
     #cv2.imwrite('out%s.jpg' % i, im)
     imgray = cv2.cvtColor(im,cv2.COLOR_BGR2GRAY)
