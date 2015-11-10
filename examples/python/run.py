@@ -35,10 +35,11 @@ sleep(1.5)
 
 ims = []
 for i in range(3):
-    # read contents into numpy array
+    # obtain three different images
     ims.append(cv2.cvtColor(np.frombuffer(S.read(1696*720*3),dtype=np.uint8).reshape(720,1696,3),cv2.COLOR_BGR2RGB))
     sleep(0.5)
 
+# compute the median
 med = np.array(ims[0])
 np.median(np.array(ims), 0, out=med)
 cv2.imwrite('outmed.jpg', med)
@@ -54,21 +55,38 @@ expected_y = 0
 xpos = 0
 ypos = 0
 
-t_start = time.clock()
+# xposition of the starting line, and y position determining upper half of track
+startx = 1696/2
+starty = 720/2
 
-#while(True): 
+# number of laps before quitting
+NUM_LAPS = 20
+# laps already driven
+laps = 0
+
+t_start = time.clock()
+t_lapstart = t_start
+laptimes = []
+
+# number of times we didn't find any contour
 bad = 0
-for _ in range(100):
+
+
+while (True):
     car.set_speed(1200, 5000)
-    # read contents into numpy array
+    # read image from camera
     cur_im = np.frombuffer(S.read(1696*720*3),dtype=np.uint8).reshape(720,1696,3)
     cur_im = cv2.cvtColor(cur_im,cv2.COLOR_BGR2RGB)
+    # subtract median images
     im = cv2.subtract(cur_im, med)
     #cv2.imwrite('out%s.jpg' % i, im)
+    # convert to greyscale, blur and convert to B/W with threshold
+    # TODO: adaptive threshold value depending on lighting
     imgray = cv2.cvtColor(im,cv2.COLOR_BGR2GRAY)
     imgray = cv2.GaussianBlur(imgray,(15,15),0)
     # imgray = cv2.medianBlur(imgray,5)
     ret,thresh = cv2.threshold(imgray,96,255,0)
+    # compute contours. ret is an error value
     ret, contours, hierarchy = cv2.findContours(thresh,cv2.RETR_TREE,cv2.CHAIN_APPROX_SIMPLE)
     #cv2.imwrite('outg%s.jpg' % i, imgray)
     #cv2.imwrite('outt%s.jpg' % i, thresh)
@@ -79,21 +97,23 @@ for _ in range(100):
     oldold_y = old_y
     old_x = xpos
     old_y = ypos
-    # TODO: take elapsed time into account?
+    # TODO: take elapsed time into account and scale vector accordingly
     expected_x = old_x + (old_x - oldold_x)
     expected_y = old_y + (old_y - oldold_y)
     print ("Expected position: %4d, %4d" % (expected_x, expected_y))
 
     if hierarchy == None:
-    print("No car found")
+        # no contours found at all
+        print("No car found")
         cv2.imwrite('out%s.jpg' % bad, im)
         bad += 1
         # use expected position if no car found
         xpos = expected_x
         ypos = expected_y
     else:
+        # count cars with non-trivial homology
         homology_cars = 0
-        # currently records centroids for contours with children
+        # currently records centroids for contours with children, currently unused
         centroids = []
         for i in range(len(hierarchy[0])):
             if hierarchy[0][i][2] >= 0:
@@ -104,20 +124,46 @@ for _ in range(100):
                 print("Actual position:   %4d, %4d" % (xpos, ypos))
                 centroids.append((xpos, ypos))
                 homology_cars += 1
-        # TODO: What happens if we find two cars?
+        if homology_cars >= 2:
+            # TODO: What happens if we find two cars?
+            pass
         if homology_cars == 0:
-            # use expected position if no homology car found
             # TODO: find a good blob that might be our car instead of dead reckoning
-            # maybe use convexity defects for this
+            # TODO: use expected position and maybe convexity defects for this
+            # use expected position if no homology car found
             xpos = expected_x
             ypos = expected_y
     #print hierarchy
     #cv2.imwrite('out%s.jpg' % i, im)
     #sleep(0.1)
+
     t_end = time.clock()
-    print("Elapsed time:    %f seconds\n" % t_end - t_start)
+    dt = t_end - t_start
+    print("Elapsed time:    %f seconds\n" % dt)
     t_start = t_end
 
+    if ypos < starty and xpos >= startx and old_x < startx:
+        #interpolate linearly to determine the actual time when crossing the line
+        dx = xpos - old_x
+        v = float(dx)/dt
+        x_excess = xpos - startx
+        t_excess = x_excess / v
+        t_adjusted = t_end - t_excess
+        laptime = t_adjusted - t_lapstart
+
+        # in the top half of the track and just traversed from the left half to the right half
+        print("Lap complete!    %f seconds\n" % laptime)
+        if laps != 0:
+            # don't record the incomplete lap
+            laptimes.append(laptime)
+        t_lapstart = t_adjusted
+        laps += 1
+        if laps == NUM_LAPS:
+            # stop after 20 laps
+            break
+
+
+print(laptimes)
 
 # finally, detach from memory again
 S.detach()
