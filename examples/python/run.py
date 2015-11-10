@@ -47,12 +47,14 @@ old_x = 0
 old_y = 0
 oldold_x = 0
 oldold_y = 0
-centroid_x = 0
-centroid_y = 0
 expected_x = 0
 expected_y = 0
-t_start = time.clock()
 
+# our official position
+xpos = 0
+ypos = 0
+
+t_start = time.clock()
 
 #while(True): 
 bad = 0
@@ -75,24 +77,40 @@ for _ in range(100):
 
     oldold_x = old_x
     oldold_y = old_y
-    old_x = centroid_x
-    old_y = centroid_y
+    old_x = xpos
+    old_y = ypos
+    # TODO: take elapsed time into account?
     expected_x = old_x + (old_x - oldold_x)
     expected_y = old_y + (old_y - oldold_y)
     print ("Expected position: %4d, %4d" % (expected_x, expected_y))
 
     if hierarchy == None:
-	print("No car found")
+    print("No car found")
         cv2.imwrite('out%s.jpg' % bad, im)
         bad += 1
+        # use expected position if no car found
+        xpos = expected_x
+        ypos = expected_y
     else:
+        homology_cars = 0
+        # currently records centroids for contours with children
+        centroids = []
         for i in range(len(hierarchy[0])):
-	    # has a child:
             if hierarchy[0][i][2] >= 0:
-	        M = cv2.moments(contours[i])
-	        centroid_x = int(M['m10']/M['m00'])
-            centroid_y = int(M['m01']/M['m00'])
-	        print("Actual position:   %4d, %4d" % (centroid_x, centroid_y))
+                # contour has a child:
+                M = cv2.moments(contours[i])
+                xpos = int(M['m10']/M['m00'])
+                ypos = int(M['m01']/M['m00'])
+                print("Actual position:   %4d, %4d" % (xpos, ypos))
+                centroids.append((xpos, ypos))
+                homology_cars += 1
+        # TODO: What happens if we find two cars?
+        if homology_cars == 0:
+            # use expected position if no homology car found
+            # TODO: find a good blob that might be our car instead of dead reckoning
+            # maybe use convexity defects for this
+            xpos = expected_x
+            ypos = expected_y
     #print hierarchy
     #cv2.imwrite('out%s.jpg' % i, im)
     #sleep(0.1)
