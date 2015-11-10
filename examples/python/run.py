@@ -3,7 +3,7 @@ from anki import *
 import sysv_ipc
 import numpy as np
 import cv2
-from time import sleep
+from time import sleep,clock
 
 RHO = "E6:D8:52:F1:D9:43"
 BOSON = "D9:81:41:5C:D4:31"
@@ -51,6 +51,8 @@ centroid_x = 0
 centroid_y = 0
 expected_x = 0
 expected_y = 0
+t_start = time.clock()
+
 
 #while(True): 
 bad = 0
@@ -77,7 +79,7 @@ for _ in range(100):
     old_y = centroid_y
     expected_x = old_x + (old_x - oldold_x)
     expected_y = old_y + (old_y - oldold_y)
-    print ("exp: ",expected_x, expected_y)	
+    print ("Expected position: %4d, %4d" % (expected_x, expected_y))
 
     if hierarchy == None:
 	print("No car found")
@@ -89,11 +91,14 @@ for _ in range(100):
             if hierarchy[0][i][2] >= 0:
 	        M = cv2.moments(contours[i])
 	        centroid_x = int(M['m10']/M['m00'])
-                centroid_y = int(M['m01']/M['m00'])
-	        print (centroid_x, centroid_y)
+            centroid_y = int(M['m01']/M['m00'])
+	        print("Actual position:   %4d, %4d" % (centroid_x, centroid_y))
     #print hierarchy
     #cv2.imwrite('out%s.jpg' % i, im)
-    sleep(0.1)
+    #sleep(0.1)
+    t_end = time.clock()
+    print("Elapsed time:    %f seconds\n" % t_end - t_start)
+    t_start = t_end
 
 
 # finally, detach from memory again
