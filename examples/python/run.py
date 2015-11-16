@@ -81,15 +81,23 @@ t_lapstart = t_start
 laptimes = []
 
 #velocities for the last few frames, first one is newest
-NUM_VELS = 10
+NUM_VELS = 15
 velocities = [(0,0)]*NUM_VELS
 positions = [(0,0)]*NUM_VELS
 # 0 is straight, 1 is curvy
 is_curvy = [0]*NUM_VELS
 
-# positions where track changes from curvy to straight or vice versa
+# each landmark is a list of positions, in each list:
+# first position is where track changes from curvy to straight or vice versa
+# next are the positions visited before reaching the landmark
 landmarks = []
 certain_landmarks = []
+
+# time in frames to look back to take the position as landmark position
+# when we found a curvature change.
+LPOS_INDEX = 5
+# length of a landmark list
+LANDMARK_LEN = NUM_VELS-LPOS_INDEX
 
 # number of times we didn't find any contour
 bad = 0
@@ -222,11 +230,11 @@ while (True):
     # change from curvy to straight or vice versa
     if (sum(is_curvy[0:3]) >= 2 and sum(is_curvy[3:6]) <= 1)\
         or (sum(is_curvy[0:3]) <= 1 and sum(is_curvy[3:6]) >= 2):
-        landmarks.append(positions[5])
+        landmarks.append(positions[LPOS_INDEX:NUM_VELS])
     # change from curvy to straight or vice versa, strict criterion
     if (sum(is_curvy[0:3]) >= 3 and sum(is_curvy[3:6]) <= 0)\
         or (sum(is_curvy[0:3]) <= 0 and sum(is_curvy[3:6]) >= 3):
-        certain_landmarks.append(positions[5])
+        certain_landmarks.append(positions[LPOS_INDEX:NUM_VELS])
 
 
 
@@ -269,11 +277,11 @@ print(landmarks_final)
 
 # draw landmarks on the median image and save it.
 for c in landmarks:
-    cv2.circle(med, c, 5, (255,0,127), -1)
+    cv2.circle(med, c[0], 5, (255,0,127), -1)
 for c in certain_landmarks:
-    cv2.circle(med, c, 5, (255,0,255), -1)
+    cv2.circle(med, c[0], 5, (255,0,255), -1)
 for c in landmarks_final:
-    cv2.circle(med, c, 5,   (0,0,255), -1)
+    cv2.circle(med, c[0], 5,   (0,0,255), -1)
 cv2.imwrite('outmed.jpg', med)
 
 
