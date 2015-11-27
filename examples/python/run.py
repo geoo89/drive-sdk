@@ -7,113 +7,130 @@ import numpy as np
 import cv2
 from time import sleep,time
 
-# mode
-mode = 0
+# modes
+DEMONSTRATION_SIMPLE = 0    # the normal track
+COMPUTE_LANDMARKS = 1
+LEARN = 2
+
+MODE = DEMONSTRATION_SIMPLE
+
+RHO    = "E6:D8:52:F1:D9:43"    # red
+BOSON  = "D9:81:41:5C:D4:31"    # blue?
+KATAL  = "D8:64:85:29:01:C0"    # grey?
+KOURAI = "EB:0D:D8:05:CA:1A"    # yellow
+NUKE   = "C5:34:5D:26:BE:53"    # green
+HADION = "D4:48:49:03:98:95"    # orange
+
+CAR_NAME = KOURAI
+
+# number of laps before quitting
+NUM_LAPS = 10
 
 BRIGHTNESS_THRESHOLD = 96
+
+MAX_IMAGES = 20
+
+#velocities for the last few frames, first one is newest
+LEN_TRACEBACK = 30
+
+# global variables
+positions = [(0,0)]*LEN_TRACEBACK
+med = None
+sh_mem = None
+car = None
+# laps already driven
+laps = 0
+t_start = None
+t_lapstart = None
+laptimes = []
+# number of times we didn't find any contour
+bad = 0
+
+if MODE == COMPUTE_LANDMARKS
+    # each landmark is a list of positions, in each list:
+    # first position is where track changes from curvy to straight or vice versa
+    # next are the positions visited before reaching the landmark
+    landmarks = []
+    certain_landmarks = []
+    # 0 is straight, 1 is curvy
+    is_curvy = [0]*LEN_TRACEBACK
+
+    # time in frames to look back to take the position as landmark position
+    # when we found a curvature change.
+    LPOS_INDEX = 5
+    # length of a landmark list
+    LANDMARK_LEN = LEN_TRACEBACK-LPOS_INDEX
+
 
 # angle between two vectors, output in [0, pi]
 def angle(a, b = (1,0)):
     return np.arccos(np.dot(a,b) / np.linalg.norm(a) * np.linalg.norm(b))
 
+
 def dprint(text):
     pass
     #print(text)
 
-RHO = "E6:D8:52:F1:D9:43"
-BOSON = "D9:81:41:5C:D4:31"
-KATAL = "D8:64:85:29:01:C0"
-KOURAI = "EB:0D:D8:05:CA:1A"
-NUKE = "C5:34:5D:26:BE:53"
-HADION = "D4:48:49:03:98:95"
 
-car = Car(KOURAI)
-if not car:
-    print "Couldn't create Car object"
-    raise SystemExit
+def initialize(car_name):
+    global car = Car(car_name)
+    if not car:
+        print "Couldn't create Car object"
+        raise SystemExit
 
-err = car.connect()
-if err:
-    print "Couldn't connect, code", err
-    raise SystemExit
+    err = car.connect()
+    if err:
+        print "Couldn't connect, code", err
+        raise SystemExit
 
-# attach to shared memory with key 192012003
-S=sysv_ipc.SharedMemory(key=192012003)
+    # attach to shared memory with key 192012003
+    global sh_mem = sysv_ipc.SharedMemory(key=192012003)
 
-sleep(1.5)
+    sleep(1.5)
 
 
-status = car.set_speed(900, 5000)
-if status:
-    print "Couldn't set speed, code",  status
-    raise SystemExit
+    status = car.set_speed(900, 5000)
+    if status:
+        print "Couldn't set speed, code",  status
+        raise SystemExit
 
 
-ims = []
-for i in range(3):
-    # obtain three different images
-    ims.append(cv2.cvtColor(np.frombuffer(S.read(1696*720*3),dtype=np.uint8).reshape(720,1696,3),cv2.COLOR_BGR2RGB))
-    sleep(0.5)
+    ims = []
+    for i in range(3):
+        # obtain three different images
+        ims.append(cv2.cvtColor(np.frombuffer(sh_mem.read(1696*720*3),dtype=np.uint8).reshape(720,1696,3),cv2.COLOR_BGR2RGB))
+        sleep(0.5)
 
-MAX_IMAGES = 20
+    # compute the median
+    global med = np.array(ims[0])
+    np.median(np.array(ims), 0, out=med)
 
-# compute the median
-med = np.array(ims[0])
-np.median(np.array(ims), 0, out=med)
+    # xposition of the starting line, and y position determining upper half of track
+    STARTX = 1696/2
+    STARTY = 720/2
 
-old_x = 0
-old_y = 0
-oldold_x = 0
-oldold_y = 0
-expected_x = 0
-expected_y = 0
+    global t_start = time()
+    global t_lapstart = t_start
 
-# our official position
-xpos = 0
-ypos = 0
+    car.change_lane(-100, 100, -1000)
 
-# xposition of the starting line, and y position determining upper half of track
-startx = 1696/2
-starty = 720/2
 
-# number of laps before quitting
-NUM_LAPS = 10
-# laps already driven
-laps = 0
+def get_expected_pos():
+    # compute expected position
+    # TODO: take elapsed time into account and scale vector accordingly?
+    # (improvement through that should be negligible)
+    oldold_x, oldold_y = positions[1]
+    old_x, old_y = positions[0]
+    # could also use tuples and np.add/sub here
+    expected_x = old_x + (old_x - oldold_x)
+    expected_y = old_y + (old_y - oldold_y)
+    dprint ("Expected position: %4d, %4d" % (expected_x, expected_y))
+    return expected_x, expected_y
 
-t_start = time()
-t_lapstart = t_start
-laptimes = []
 
-#velocities for the last few frames, first one is newest
-NUM_VELS = 30
-velocities = [(0,0)]*NUM_VELS
-positions = [(0,0)]*NUM_VELS
-# 0 is straight, 1 is curvy
-is_curvy = [0]*NUM_VELS
-
-# each landmark is a list of positions, in each list:
-# first position is where track changes from curvy to straight or vice versa
-# next are the positions visited before reaching the landmark
-landmarks = []
-certain_landmarks = []
-
-# time in frames to look back to take the position as landmark position
-# when we found a curvature change.
-LPOS_INDEX = 5
-# length of a landmark list
-LANDMARK_LEN = NUM_VELS-LPOS_INDEX
-
-# number of times we didn't find any contour
-bad = 0
-
-car.change_lane(-100, 100, -1000)
-
-while (True):
-    #car.set_speed(1200, 5000)
-
+def position_from_camera(expected_x, expected_y):
     # read image from camera
-    cur_im = np.frombuffer(S.read(1696*720*3),dtype=np.uint8).reshape(720,1696,3)
+    cur_im = np.frombuffer(sh_mem.read(1696*720*3),dtype=np.uint8).reshape(720,1696,3)
     cur_im = cv2.cvtColor(cur_im,cv2.COLOR_BGR2RGB)
 
     # subtract median image
@@ -133,36 +150,25 @@ while (True):
     cv2.drawContours(im,contours,-1,(0,255,0),2)
 
 
-
-
-    # compute expected position
-    # TODO: take elapsed time into account and scale vector accordingly?
-    # (improvement through that should be negligible)
-    oldold_x = old_x
-    oldold_y = old_y
-    old_x = xpos
-    old_y = ypos
-    expected_x = old_x + (old_x - oldold_x)
-    expected_y = old_y + (old_y - oldold_y)
-    dprint ("Expected position: %4d, %4d" % (expected_x, expected_y))
-
     if hierarchy == None:
         # no contours found at all
         print("No car found, using prediction")
         cv2.imwrite('out%s.jpg' % bad, im)
-        bad = (bad + 1) % MAX_IMAGES
+        global bad = (bad + 1) % MAX_IMAGES
         # use expected position if no car found
         xpos = expected_x
         ypos = expected_y
     else:
         # count cars with non-trivial homology
         homology_cars = 0
-        # currently records centroids for contours with children, currently unused
+        # centroids for contours with children
         hom_centroids = []
+        # centroids for contours without children
         bad_centroids = []
         for i in range(len(hierarchy[0])):
             M = cv2.moments(contours[i])
             if M['m00'] != 0:
+                    # compute the centroid
                     x = int(M['m10']/M['m00'])
                     y = int(M['m01']/M['m00'])
                     if hierarchy[0][i][2] >= 0:
@@ -170,6 +176,7 @@ while (True):
                         dprint("Actual position:   %4d, %4d" % (xpos, ypos))
                         hom_centroids.append((x, y))
                         homology_cars += 1
+                        # tentatively set this as our new position
                         xpos = x
                         ypos = y
                     else:
@@ -179,7 +186,7 @@ while (True):
             # TODO: What happens if we find two cars?
             # This is rare, but take the one clostest to expect position?
             cv2.imwrite('out%s.jpg' % bad, im)
-            bad = (bad + 1) % MAX_IMAGES
+            global bad = (bad + 1) % MAX_IMAGES
             
         if homology_cars == 0:
             # No homology car found
@@ -208,104 +215,139 @@ while (True):
             if found == False:
                 print("No sensible alternative found, using prediction")
                 cv2.imwrite('out%s.jpg' % bad, im)
-                bad = (bad + 1) % MAX_IMAGES
+                global bad = (bad + 1) % MAX_IMAGES
 
-    # now xpos and ypos are the official positions
-    # and we can reasonably trust them to be correct
+    return xpos, ypos
 
-    velocities = [(xpos - old_x, ypos - old_y)] + velocities[0:NUM_VELS-1]
-    positions = [(xpos, ypos)] + positions[0:NUM_VELS-1]
 
-    if mode == 1:
-    	# average the last two vectors, and the previous two vectors
-    	# for each of them compute the angle of the resulting vector
-    	# (we take two each to filter out noise)
-    	angle_new = angle(np.add(velocities[1], velocities[0]))
-    	angle_old = angle(np.add(velocities[3], velocities[2]))
-    	# compute the difference between the angles, centered around 0
-    	diff = (angle_new - angle_old + np.pi) % (2*np.pi) - np.pi
+def compute_landmarks():
+    # average the last two vectors, and the previous two vectors
+    # for each of them compute the angle of the resulting vector
+    # (we take two each to filter out noise)
+    angle_new = angle(np.sub(positions[2], positions[0]))
+    angle_old = angle(np.sub(positions[4], positions[2]))
+    # compute the difference between the angles, centered around 0
+    diff = (angle_new - angle_old + np.pi) % (2*np.pi) - np.pi
 
-    	if np.abs(diff) < 0.15:
-            # straight
-            is_curvy = [0] + is_curvy[0:NUM_VELS-1]
-    	else:
-       	    # curvy
-            is_curvy = [1] + is_curvy[0:NUM_VELS-1]
+    if np.abs(diff) < 0.15:
+        # straight
+        global is_curvy = [0] + is_curvy[0:LEN_TRACEBACK-1]
+    else:
+        # curvy
+        global is_curvy = [1] + is_curvy[0:LEN_TRACEBACK-1]
 
-        # output angle change, curviness, position and number of bad 
-        print((diff, is_curvy[0], positions[0], bad))
+    # output angle change, curviness, position and number of bad 
+    print((diff, is_curvy[0], positions[0], bad))
 
-        # change from curvy to straight or vice versa
-        if (sum(is_curvy[0:3]) >= 2 and sum(is_curvy[3:6]) <= 1)\
-            or (sum(is_curvy[0:3]) <= 1 and sum(is_curvy[3:6]) >= 2):
-            landmarks.append(positions[LPOS_INDEX:NUM_VELS])
-        # change from curvy to straight or vice versa, strict criterion
-        if (sum(is_curvy[0:3]) >= 3 and sum(is_curvy[3:6]) <= 0)\
-            or (sum(is_curvy[0:3]) <= 0 and sum(is_curvy[3:6]) >= 3):
-            certain_landmarks.append(positions[LPOS_INDEX:NUM_VELS])
+    # change from curvy to straight or vice versa
+    if (sum(is_curvy[0:3]) >= 2 and sum(is_curvy[3:6]) <= 1)\
+        or (sum(is_curvy[0:3]) <= 1 and sum(is_curvy[3:6]) >= 2):
+        landmarks.append(positions[LPOS_INDEX:LEN_TRACEBACK])
+    # change from curvy to straight or vice versa, strict criterion
+    if (sum(is_curvy[0:3]) >= 3 and sum(is_curvy[3:6]) <= 0)\
+        or (sum(is_curvy[0:3]) <= 0 and sum(is_curvy[3:6]) >= 3):
+        certain_landmarks.append(positions[LPOS_INDEX:LEN_TRACEBACK])    
 
-    if mode == 0:
-        if (positions[0][0] >= landmarks_data[2][0][0] and positions[1][0] <= landmarks_data[2][0][0]):
-            car.set_speed(2700, 50000)    
-        if (positions[0][0] >= landmarks_data[1][18][0] and positions[1][0] <= landmarks_data[1][18][0]):
-            car.set_speed(1220, 50000)
-        if (positions[0][0] <= landmarks_data[0][0][0] and positions[1][0] >= landmarks_data[0][0][0]):
-            car.set_speed(1900, 50000)    
-        if (positions[0][0] <= landmarks_data[3][24][0] and positions[1][0] >= landmarks_data[3][24][0]):
-            car.set_speed(1220, 50000)
-    
-    #print(positions[0])
-    
+
+def do_demonstration_simple():
+    if (positions[0][0] >= landmarks_data[2][0][0] and positions[1][0] <= landmarks_data[2][0][0]):
+        car.set_speed(2700, 50000)    
+    if (positions[0][0] >= landmarks_data[1][18][0] and positions[1][0] <= landmarks_data[1][18][0]):
+        car.set_speed(1220, 50000)
+    if (positions[0][0] <= landmarks_data[0][0][0] and positions[1][0] >= landmarks_data[0][0][0]):
+        car.set_speed(1900, 50000)    
+    if (positions[0][0] <= landmarks_data[3][24][0] and positions[1][0] >= landmarks_data[3][24][0]):
+        car.set_speed(1220, 50000)
+
+
+def do_learn():
+    pass
+
+
+def get_laptime():
+    xpos  = position[0][0]
+    ypos  = position[0][1]
+    old_x = position[1][0]
+
     t_end = time()
     dt = t_end - t_start
     dprint("Elapsed time:    %f seconds\n" % dt)
-    t_start = t_end
+    global t_start = t_end
 
-    if ypos < starty and xpos >= startx and old_x < startx:
+    if ypos < STARTY and xpos >= STARTX and old_x < STARTX:
         #interpolate linearly to determine the actual time when crossing the line
         dx = xpos - old_x
         v = float(dx)/dt
-        x_excess = xpos - startx
+        x_excess = xpos - STARTX
         t_excess = x_excess / v
         t_adjusted = t_end - t_excess
         laptime = t_adjusted - t_lapstart       
 
         # in the top half of the track and just traversed from the left half to the right half
         print("Lap complete!    %f seconds\n" % laptime)
-        if laps != 0:
-            # don't record the incomplete lap
-            laptimes.append(laptime)
-        t_lapstart = t_adjusted
+        global t_lapstart = t_adjusted
         laps += 1
+        if laps > 1:
+            # don't record the incomplete lap
+            return laptime
+
+    return None
+
+
+def postprocess_landmarks():
+    #print(landmarks)
+    #print(certain_landmarks)
+    landmarks_final = calc_landmarks(landmarks, certain_landmarks)
+    print(landmarks_final)
+
+    # draw landmarks on the median image and save it.
+    for c in landmarks:
+        cv2.circle(med, (int(c[0][0]), int(c[0][1])), 5, (255,0,127), -1)
+    for c in certain_landmarks:
+        cv2.circle(med, (int(c[0][0]), int(c[0][1])), 5, (255,0,255), -1)
+    for c in landmarks_final:
+        cv2.circle(med, (int(c[0][0]), int(c[0][1])), 5,   (0,0,255), -1)
+    cv2.imwrite('outmed.jpg', med)
+
+
+def deinitialize():
+    print(laptimes)
+
+    # finally, detach from memory again, stop car, quit
+    S.detach()
+    res = car.stop()
+    sleep(1)
+    del car
+
+
+if __name__ == "__main__":
+
+    initialize(CAR_NAME)
+
+    while (True):
+        ex, ey = get_expected_pos()
+        xpos, ypos = position_from_camera(ex, ey)
+
+        # now xpos and ypos are the official positions
+        # and we can reasonably trust them to be correct
+        positions = [(xpos, ypos)] + positions[0:LEN_TRACEBACK-1]
+
+        if MODE == COMPUTE_LANDMARKS:
+            compute_landmarks()
+        if MODE == DEMONSTRATION_SIMPLE:
+            do_demonstration_simple()
+        if MODE == LEARN:
+            do_learn()
+       
+        laptime = get_lap_time()
+        if laptime != None:
+            laptimes.append(laptime)
         if laps == NUM_LAPS:
-            # stop after 20 laps
             break
-    
-    
+        
+        sleep(0.03333)
 
+    if MODE == COMPUTE_LANDMARKS:
+        postprocess_landmarks()
 
-    sleep(0.03333)
-
-
-
-print(laptimes)
-#print(landmarks)
-#print(certain_landmarks)
-landmarks_final = calc_landmarks(landmarks, certain_landmarks)
-print(landmarks_final)
-
-# draw landmarks on the median image and save it.
-for c in landmarks:
-    cv2.circle(med, (int(c[0][0]), int(c[0][1])), 5, (255,0,127), -1)
-for c in certain_landmarks:
-    cv2.circle(med, (int(c[0][0]), int(c[0][1])), 5, (255,0,255), -1)
-for c in landmarks_final:
-    cv2.circle(med, (int(c[0][0]), int(c[0][1])), 5,   (0,0,255), -1)
-cv2.imwrite('outmed.jpg', med)
-
-
-# finally, detach from memory again, stop car, quit
-S.detach()
-res = car.stop()
-sleep(1)
-del car
+    deinitialize()
