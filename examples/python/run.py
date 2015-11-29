@@ -46,7 +46,7 @@ laptimes = []
 # number of times we didn't find any contour
 bad = 0
 
-if MODE == COMPUTE_LANDMARKS
+if MODE == COMPUTE_LANDMARKS:
     # each landmark is a list of positions, in each list:
     # first position is where track changes from curvy to straight or vice versa
     # next are the positions visited before reaching the landmark
@@ -73,7 +73,8 @@ def dprint(text):
 
 
 def initialize(car_name):
-    global car = Car(car_name)
+    global car
+    car = Car(car_name)
     if not car:
         print "Couldn't create Car object"
         raise SystemExit
@@ -84,7 +85,8 @@ def initialize(car_name):
         raise SystemExit
 
     # attach to shared memory with key 192012003
-    global sh_mem = sysv_ipc.SharedMemory(key=192012003)
+    global sh_mem
+    sh_mem = sysv_ipc.SharedMemory(key=192012003)
 
     sleep(1.5)
 
@@ -102,15 +104,14 @@ def initialize(car_name):
         sleep(0.5)
 
     # compute the median
-    global med = np.array(ims[0])
+    global med
+    med = np.array(ims[0])
     np.median(np.array(ims), 0, out=med)
 
-    # xposition of the starting line, and y position determining upper half of track
-    STARTX = 1696/2
-    STARTY = 720/2
-
-    global t_start = time()
-    global t_lapstart = t_start
+    global t_start
+    t_start = time()
+    global t_lapstart
+    t_lapstart = t_start
 
     car.change_lane(-100, 100, -1000)
 
@@ -149,12 +150,12 @@ def position_from_camera(expected_x, expected_y):
     # Draw contours. Image is only saved if no suitable car found
     cv2.drawContours(im,contours,-1,(0,255,0),2)
 
-
+    global bad
     if hierarchy == None:
         # no contours found at all
         print("No car found, using prediction")
         cv2.imwrite('out%s.jpg' % bad, im)
-        global bad = (bad + 1) % MAX_IMAGES
+        bad = (bad + 1) % MAX_IMAGES
         # use expected position if no car found
         xpos = expected_x
         ypos = expected_y
@@ -173,7 +174,7 @@ def position_from_camera(expected_x, expected_y):
                     y = int(M['m01']/M['m00'])
                     if hierarchy[0][i][2] >= 0:
                         # contour has a child:
-                        dprint("Actual position:   %4d, %4d" % (xpos, ypos))
+                        dprint("Actual position:   %4d, %4d" % (x, y))
                         hom_centroids.append((x, y))
                         homology_cars += 1
                         # tentatively set this as our new position
@@ -186,7 +187,7 @@ def position_from_camera(expected_x, expected_y):
             # TODO: What happens if we find two cars?
             # This is rare, but take the one clostest to expect position?
             cv2.imwrite('out%s.jpg' % bad, im)
-            global bad = (bad + 1) % MAX_IMAGES
+            bad = (bad + 1) % MAX_IMAGES
             
         if homology_cars == 0:
             # No homology car found
@@ -215,7 +216,7 @@ def position_from_camera(expected_x, expected_y):
             if found == False:
                 print("No sensible alternative found, using prediction")
                 cv2.imwrite('out%s.jpg' % bad, im)
-                global bad = (bad + 1) % MAX_IMAGES
+                bad = (bad + 1) % MAX_IMAGES
 
     return xpos, ypos
 
@@ -229,12 +230,13 @@ def compute_landmarks():
     # compute the difference between the angles, centered around 0
     diff = (angle_new - angle_old + np.pi) % (2*np.pi) - np.pi
 
+    global is_curvy
     if np.abs(diff) < 0.15:
         # straight
-        global is_curvy = [0] + is_curvy[0:LEN_TRACEBACK-1]
+        is_curvy = [0] + is_curvy[0:LEN_TRACEBACK-1]
     else:
         # curvy
-        global is_curvy = [1] + is_curvy[0:LEN_TRACEBACK-1]
+        is_curvy = [1] + is_curvy[0:LEN_TRACEBACK-1]
 
     # output angle change, curviness, position and number of bad 
     print((diff, is_curvy[0], positions[0], bad))
@@ -265,14 +267,21 @@ def do_learn():
 
 
 def get_laptime():
-    xpos  = position[0][0]
-    ypos  = position[0][1]
-    old_x = position[1][0]
+    # xposition of the starting line, and y position determining upper half of track
+    STARTX = 1696/2
+    STARTY = 720/2
+
+    xpos  = positions[0][0]
+    ypos  = positions[0][1]
+    old_x = positions[1][0]
 
     t_end = time()
     dt = t_end - t_start
     dprint("Elapsed time:    %f seconds\n" % dt)
-    global t_start = t_end
+    global t_start
+    t_start = t_end
+    global t_lapstart
+    global laps
 
     if ypos < STARTY and xpos >= STARTX and old_x < STARTX:
         #interpolate linearly to determine the actual time when crossing the line
@@ -285,7 +294,7 @@ def get_laptime():
 
         # in the top half of the track and just traversed from the left half to the right half
         print("Lap complete!    %f seconds\n" % laptime)
-        global t_lapstart = t_adjusted
+        t_lapstart = t_adjusted
         laps += 1
         if laps > 1:
             # don't record the incomplete lap
@@ -312,9 +321,10 @@ def postprocess_landmarks():
 
 def deinitialize():
     print(laptimes)
+    global car
 
     # finally, detach from memory again, stop car, quit
-    S.detach()
+    sh_mem.detach()
     res = car.stop()
     sleep(1)
     del car
@@ -339,7 +349,7 @@ if __name__ == "__main__":
         if MODE == LEARN:
             do_learn()
        
-        laptime = get_lap_time()
+        laptime = get_laptime()
         if laptime != None:
             laptimes.append(laptime)
         if laps == NUM_LAPS:
