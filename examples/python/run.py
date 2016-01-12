@@ -11,6 +11,7 @@ from time import sleep,time
 DEMONSTRATION_SIMPLE = 0    # the normal track
 COMPUTE_LANDMARKS = 1
 LEARN = 2
+COMPUTE_CURVATURE = 3
 
 MODE = DEMONSTRATION_SIMPLE
 
@@ -262,8 +263,103 @@ def do_demonstration_simple():
         car.set_speed(1220, 50000)
 
 
-def do_learn():
-    pass
+curv_list = []
+curv_data = [] # TODO: initialize
+
+
+def compute_curvature():
+    # average the last two vectors, and the previous two vectors
+    # for each of them compute the angle of the resulting vector
+    # (we take two each to filter out noise)
+    angle_new = angle(np.sub(positions[2], positions[0]))
+    angle_old = angle(np.sub(positions[4], positions[2]))
+    # compute the difference between the angles, centered around 0
+    diff = (angle_new - angle_old + np.pi) % (2*np.pi) - np.pi
+
+    curv_list.append((positions[0], diff))
+
+
+
+
+# initial parameters
+NPARAMS = 4
+params = (10.0, 10.0, -800, 2000)
+# maximum perturbation within a parameter
+param_ranges = (0.5, 0.5, 20, 50)
+temp = 1.0
+vcur = 900 # TODO
+
+MIN_DATA = 10
+# contains pairs:
+#   first element is the set of 4 parameters
+#   second element is the time taken with this policy
+# TODO: read to and from file
+data = []
+
+
+def get_next_curvature_change():
+    cpos = np.array(positions[0])
+
+    idx = 0
+    for i in range(len(curv_data)):
+        pos = np.array(curv_data[i][0])
+        dist = np.linalg.norm(cpos - pos)
+        if dist < 50:
+            idx = i
+            break
+
+    ccurv = curv_data[idx][1]
+
+    i = idx
+    while True:
+        curv = curv_data[i][1]
+        if np.abs(ccurv - curv) > 10: # TODO: find constant
+            pos = np.array(curv_data[i][0])
+            dist = np.linalg.norm(cpos - pos)
+            return dist
+        i += 1
+        if i == len(curv_data):
+            i = 0
+        if i == idx:
+            return None
+
+    
+
+
+def follow_policy():
+
+    xpos  = positions[0][0]
+    ypos  = positions[0][1]    
+    xnew, ynew, old_curv, new_curv = get_next_curvature_change(xpos, ypos)
+
+    #vcur = TODO: compute here
+
+    dist = numpy.linalg.norm(np.array((xnew, ynew)) - np.array((xpos, ypos)))
+
+    # definition of the actual policy
+    vnew = params[2] * new_curv + params[3]
+    if (dist / vcur) < params[0] + max(0, params[1]*np.abs(vnew - vcur)):
+        # TODO: figure out the acceleration
+        car.set_speed(vnew, 50000)
+        vcur = vnew
+
+
+def update_policy(laptime):
+    # NOTE: instead of every lap, we could only update every few laps
+
+    data.append((params, laptime))
+    
+    # if we don't have enough data yet
+    if len(data) < MIN_DATA:
+        # just perturb a little
+        params = np.random.normal(params, temp*param_ranges, NPARAMS)
+    else:
+        # sometimes stick with the current policy (exploit)
+
+        # or do the linear regression here (exploit)
+        pass
+
+    
 
 
 def get_laptime():
@@ -301,6 +397,20 @@ def get_laptime():
             return laptime
 
     return None
+
+
+def postprocess_curvature():
+    # TODO: smoothen these values
+    
+    i = 100
+    startpos = np.array(curv_list[90][0])
+    # we want to get one full loop of curvature data
+    while np.linalg.norm(pos - startpos) > 20:
+        i += 1
+        pos = np.array(curv_list[i][0])
+    relevant_curv = curv_list[90:i+1]
+    # TODO: write this to a file
+    print(relevant_curv)
 
 
 def postprocess_landmarks():
@@ -347,11 +457,15 @@ if __name__ == "__main__":
         if MODE == DEMONSTRATION_SIMPLE:
             do_demonstration_simple()
         if MODE == LEARN:
-            do_learn()
-       
+            follow_policy()
+        if MODE == COMPUTE_CURVATURE:
+            compute_curvature()
+
         laptime = get_laptime()
         if laptime != None:
             laptimes.append(laptime)
+            if MODE == LEARN:
+                update_policy(laptime)
         if laps == NUM_LAPS:
             break
         
@@ -359,5 +473,7 @@ if __name__ == "__main__":
 
     if MODE == COMPUTE_LANDMARKS:
         postprocess_landmarks()
+    if MODE == COMPUTE_CURVATURE:
+        postprocess_curvature()
 
     deinitialize()
