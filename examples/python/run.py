@@ -14,7 +14,7 @@ COMPUTE_LANDMARKS = 1
 LEARN = 2
 COMPUTE_CURVATURE = 3
 
-MODE = COMPUTE_CURVATURE
+MODE = LEARN
 
 RHO    = "E6:D8:52:F1:D9:43"    # red
 BOSON  = "D9:81:41:5C:D4:31"    # blue?
@@ -26,7 +26,7 @@ HADION = "D4:48:49:03:98:95"    # orange
 CAR_NAME = KOURAI
 
 # number of laps before quitting
-NUM_LAPS = 10
+NUM_LAPS = 5
 
 BRIGHTNESS_THRESHOLD = 96
 
@@ -75,9 +75,9 @@ if MODE == LEARN:
 
     # initial parameters
     NPARAMS = 4
-    params = (10.0, 10.0, -800, 2000)
+    params = np.array((0.01, 0.1, -800, 2000))
     # maximum perturbation within a parameter
-    param_ranges = (0.5, 0.5, 20, 50)
+    param_ranges = np.array((0.001, 0.5, 20, 50))
     temp = 1.0
     vcur = 900 # TODO
 
@@ -87,6 +87,12 @@ if MODE == LEARN:
     #   second element is the time taken with this policy
     # TODO: read to and from file
     data = []
+    
+    # position after the relevant curvature change that warranted
+    # the previosu decition
+    nextpos = (0,0)
+    # don't make any decisions right now
+    no_decision = False
 
 
 
@@ -142,7 +148,7 @@ def initialize(car_name):
     global t_lapstart
     t_lapstart = t_start
 
-    car.change_lane(-100, 100, -1000)
+    #car.change_lane(-100, 100, -1000)
 
 
 def deinitialize():
@@ -305,8 +311,8 @@ def compute_landmarks():
     # average the last two vectors, and the previous two vectors
     # for each of them compute the angle of the resulting vector
     # (we take two each to filter out noise)
-    angle_new = angle(np.sub(positions[2], positions[0]))
-    angle_old = angle(np.sub(positions[4], positions[2]))
+    angle_new = angle(np.subtract(positions[2], positions[0]))
+    angle_old = angle(np.subtract(positions[4], positions[2]))
     # compute the difference between the angles, centered around 0
     diff = (angle_new - angle_old + np.pi) % (2*np.pi) - np.pi
 
@@ -369,8 +375,8 @@ def compute_curvature():
     # average the last two vectors, and the previous two vectors
     # for each of them compute the angle of the resulting vector
     # (we take two each to filter out noise)
-    angle_new = angle(np.sub(positions[2], positions[0]))
-    angle_old = angle(np.sub(positions[4], positions[2]))
+    angle_new = angle(np.subtract(positions[2], positions[0]))
+    angle_old = angle(np.subtract(positions[4], positions[2]))
     # compute the difference between the angles, centered around 0
     diff = (angle_new - angle_old + np.pi) % (2*np.pi) - np.pi
 
@@ -385,6 +391,8 @@ def postprocess_curvature():
 
     i = 100
     startpos = np.array(curv_list[90][0])
+    pos = np.array(curv_list[i][0])
+    
     # we want to get one full loop of curvature data
     while np.linalg.norm(pos - startpos) > 20:
         maxc = max(maxc, curv_list[i][1])
@@ -401,7 +409,7 @@ def postprocess_curvature():
     # draw landmarks on the median image and save it.
     for c in relevant_curv:
         curv = c[1]/maxabsc
-        cv2.circle(med, (int(c[0][0]), int(c[0][1])), 5, (255-min(0,255*curv),0,255+max(0,255*curv), -1))
+        cv2.circle(med, (int(c[0][0]), int(c[0][1])), 5, (255+min(0,255*curv),0,255-max(0,255*curv), -1))
 
     cv2.imwrite('outcurv.jpg', med)
 
@@ -414,6 +422,7 @@ def postprocess_curvature():
 
 
 def get_next_curvature_change():
+    global nextpos
     cpos = np.array(positions[0])
 
     idx = 0
@@ -429,33 +438,45 @@ def get_next_curvature_change():
     i = idx
     while True:
         curv = curv_data[i][1]
-        if np.abs(ccurv - curv) > 10: # TODO: find constant
+        if np.abs(ccurv - curv) > 0.2: # TODO: find constant
             pos = np.array(curv_data[i][0])
             dist = np.linalg.norm(cpos - pos)
-            return dist
+            # compute a position soon after the relevant curvature change
+            nextpos = np.array(curv_data[(i+3)%len(curv_data)][0])
+            no_decision = True
+            print(cpos, pos, nextpos, dist, ccurv, curv)
+            return dist, ccurv, curv
         i += 1
         if i == len(curv_data):
             i = 0
         if i == idx:
+            # TODO: error handling
             return None
 
 
 def follow_policy():
     global vcur
+    global no_decision
     xpos  = positions[0][0]
-    ypos  = positions[0][1]    
-    xnew, ynew, old_curv, new_curv = get_next_curvature_change(xpos, ypos)
+    ypos  = positions[0][1]
+    pos = np.array((xpos, ypos))
+    if np.linalg.norm(nextpos - pos) < 20:
+        no_decision = False
+    
+    if not no_decision:
+    
+        dist, old_curv, new_curv = get_next_curvature_change()
 
-    #vcur = TODO: compute here
+        #vcur = TODO: compute here
 
-    dist = numpy.linalg.norm(np.array((xnew, ynew)) - np.array((xpos, ypos)))
-
-    # definition of the actual policy
-    vnew = params[2] * new_curv + params[3]
-    if (dist / vcur) < params[0] + max(0, params[1]*np.abs(vnew - vcur)):
-        # TODO: figure out the acceleration
-        car.set_speed(vnew, 50000)
-        vcur = vnew
+        # definition of the actual policy
+        vnew = int(params[2] * new_curv + params[3])
+        print("vnew: %f, vcur: %f, dist: %f" % (vnew, vcur, dist))
+        if (dist / vcur) < params[0] + max(0, params[1]*np.abs(vnew - vcur)):
+            print("d/v = %f < %f = p0 + max(0, p1*abs(vn-vc))" % (dist / vcur, params[0] + max(0, params[1]*np.abs(vnew - vcur))))
+            # TODO: figure out the acceleration
+            car.set_speed(vnew, 50000)
+            vcur = vnew
 
 
 def update_policy(laptime):
@@ -469,7 +490,7 @@ def update_policy(laptime):
     # or sometimes stick with the current policy (exploit)
     if len(data) < MIN_DATA or len(data) % 8 != 0:
         # just perturb a little
-        params = np.random.normal(params, temp*param_ranges, NPARAMS)
+        params = np.random.normal(params, param_ranges*temp, NPARAMS)
     else:
         # do the linear regression here (exploit)
         pass
