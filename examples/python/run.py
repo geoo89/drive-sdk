@@ -6,14 +6,15 @@ import sysv_ipc
 import numpy as np
 import cv2
 from time import sleep,time
+import pickle
 
-# modes
+# modes -- would be much cleaner to use subclasses here...
 DEMONSTRATION_SIMPLE = 0    # the normal track
 COMPUTE_LANDMARKS = 1
 LEARN = 2
 COMPUTE_CURVATURE = 3
 
-MODE = DEMONSTRATION_SIMPLE
+MODE = COMPUTE_CURVATURE
 
 RHO    = "E6:D8:52:F1:D9:43"    # red
 BOSON  = "D9:81:41:5C:D4:31"    # blue?
@@ -61,6 +62,33 @@ if MODE == COMPUTE_LANDMARKS:
     LPOS_INDEX = 5
     # length of a landmark list
     LANDMARK_LEN = LEN_TRACEBACK-LPOS_INDEX
+
+
+if MODE == COMPUTE_CURVATURE:
+    curv_list = []
+    #curv_data = [] # TODO: initialize
+
+
+if MODE == LEARN:
+    with open('curves.dat', 'rb') as f:
+        curv_data = pickle.load(f)
+
+    # initial parameters
+    NPARAMS = 4
+    params = (10.0, 10.0, -800, 2000)
+    # maximum perturbation within a parameter
+    param_ranges = (0.5, 0.5, 20, 50)
+    temp = 1.0
+    vcur = 900 # TODO
+
+    MIN_DATA = 10
+    # contains pairs:
+    #   first element is the set of 4 parameters
+    #   second element is the time taken with this policy
+    # TODO: read to and from file
+    data = []
+
+
 
 
 # angle between two vectors, output in [0, pi]
@@ -115,6 +143,17 @@ def initialize(car_name):
     t_lapstart = t_start
 
     car.change_lane(-100, 100, -1000)
+
+
+def deinitialize():
+    print(laptimes)
+    global car
+
+    # finally, detach from memory again, stop car, quit
+    sh_mem.detach()
+    res = car.stop()
+    sleep(1)
+    del car
 
 
 def get_expected_pos():
@@ -222,146 +261,6 @@ def position_from_camera(expected_x, expected_y):
     return xpos, ypos
 
 
-def compute_landmarks():
-    # average the last two vectors, and the previous two vectors
-    # for each of them compute the angle of the resulting vector
-    # (we take two each to filter out noise)
-    angle_new = angle(np.sub(positions[2], positions[0]))
-    angle_old = angle(np.sub(positions[4], positions[2]))
-    # compute the difference between the angles, centered around 0
-    diff = (angle_new - angle_old + np.pi) % (2*np.pi) - np.pi
-
-    global is_curvy
-    if np.abs(diff) < 0.15:
-        # straight
-        is_curvy = [0] + is_curvy[0:LEN_TRACEBACK-1]
-    else:
-        # curvy
-        is_curvy = [1] + is_curvy[0:LEN_TRACEBACK-1]
-
-    # output angle change, curviness, position and number of bad 
-    print((diff, is_curvy[0], positions[0], bad))
-
-    # change from curvy to straight or vice versa
-    if (sum(is_curvy[0:3]) >= 2 and sum(is_curvy[3:6]) <= 1)\
-        or (sum(is_curvy[0:3]) <= 1 and sum(is_curvy[3:6]) >= 2):
-        landmarks.append(positions[LPOS_INDEX:LEN_TRACEBACK])
-    # change from curvy to straight or vice versa, strict criterion
-    if (sum(is_curvy[0:3]) >= 3 and sum(is_curvy[3:6]) <= 0)\
-        or (sum(is_curvy[0:3]) <= 0 and sum(is_curvy[3:6]) >= 3):
-        certain_landmarks.append(positions[LPOS_INDEX:LEN_TRACEBACK])    
-
-
-def do_demonstration_simple():
-    if (positions[0][0] >= landmarks_data[2][0][0] and positions[1][0] <= landmarks_data[2][0][0]):
-        car.set_speed(2700, 50000)    
-    if (positions[0][0] >= landmarks_data[1][18][0] and positions[1][0] <= landmarks_data[1][18][0]):
-        car.set_speed(1220, 50000)
-    if (positions[0][0] <= landmarks_data[0][0][0] and positions[1][0] >= landmarks_data[0][0][0]):
-        car.set_speed(1900, 50000)    
-    if (positions[0][0] <= landmarks_data[3][24][0] and positions[1][0] >= landmarks_data[3][24][0]):
-        car.set_speed(1220, 50000)
-
-
-curv_list = []
-curv_data = [] # TODO: initialize
-
-
-def compute_curvature():
-    # average the last two vectors, and the previous two vectors
-    # for each of them compute the angle of the resulting vector
-    # (we take two each to filter out noise)
-    angle_new = angle(np.sub(positions[2], positions[0]))
-    angle_old = angle(np.sub(positions[4], positions[2]))
-    # compute the difference between the angles, centered around 0
-    diff = (angle_new - angle_old + np.pi) % (2*np.pi) - np.pi
-
-    curv_list.append((positions[0], diff))
-
-
-
-
-# initial parameters
-NPARAMS = 4
-params = (10.0, 10.0, -800, 2000)
-# maximum perturbation within a parameter
-param_ranges = (0.5, 0.5, 20, 50)
-temp = 1.0
-vcur = 900 # TODO
-
-MIN_DATA = 10
-# contains pairs:
-#   first element is the set of 4 parameters
-#   second element is the time taken with this policy
-# TODO: read to and from file
-data = []
-
-
-def get_next_curvature_change():
-    cpos = np.array(positions[0])
-
-    idx = 0
-    for i in range(len(curv_data)):
-        pos = np.array(curv_data[i][0])
-        dist = np.linalg.norm(cpos - pos)
-        if dist < 50:
-            idx = i
-            break
-
-    ccurv = curv_data[idx][1]
-
-    i = idx
-    while True:
-        curv = curv_data[i][1]
-        if np.abs(ccurv - curv) > 10: # TODO: find constant
-            pos = np.array(curv_data[i][0])
-            dist = np.linalg.norm(cpos - pos)
-            return dist
-        i += 1
-        if i == len(curv_data):
-            i = 0
-        if i == idx:
-            return None
-
-    
-
-
-def follow_policy():
-
-    xpos  = positions[0][0]
-    ypos  = positions[0][1]    
-    xnew, ynew, old_curv, new_curv = get_next_curvature_change(xpos, ypos)
-
-    #vcur = TODO: compute here
-
-    dist = numpy.linalg.norm(np.array((xnew, ynew)) - np.array((xpos, ypos)))
-
-    # definition of the actual policy
-    vnew = params[2] * new_curv + params[3]
-    if (dist / vcur) < params[0] + max(0, params[1]*np.abs(vnew - vcur)):
-        # TODO: figure out the acceleration
-        car.set_speed(vnew, 50000)
-        vcur = vnew
-
-
-def update_policy(laptime):
-    # NOTE: instead of every lap, we could only update every few laps
-
-    data.append((params, laptime))
-    
-    # if we don't have enough data yet
-    if len(data) < MIN_DATA:
-        # just perturb a little
-        params = np.random.normal(params, temp*param_ranges, NPARAMS)
-    else:
-        # sometimes stick with the current policy (exploit)
-
-        # or do the linear regression here (exploit)
-        pass
-
-    
-
-
 def get_laptime():
     # xposition of the starting line, and y position determining upper half of track
     STARTX = 1696/2
@@ -399,18 +298,37 @@ def get_laptime():
     return None
 
 
-def postprocess_curvature():
-    # TODO: smoothen these values
-    
-    i = 100
-    startpos = np.array(curv_list[90][0])
-    # we want to get one full loop of curvature data
-    while np.linalg.norm(pos - startpos) > 20:
-        i += 1
-        pos = np.array(curv_list[i][0])
-    relevant_curv = curv_list[90:i+1]
-    # TODO: write this to a file
-    print(relevant_curv)
+
+
+
+def compute_landmarks():
+    # average the last two vectors, and the previous two vectors
+    # for each of them compute the angle of the resulting vector
+    # (we take two each to filter out noise)
+    angle_new = angle(np.sub(positions[2], positions[0]))
+    angle_old = angle(np.sub(positions[4], positions[2]))
+    # compute the difference between the angles, centered around 0
+    diff = (angle_new - angle_old + np.pi) % (2*np.pi) - np.pi
+
+    global is_curvy
+    if np.abs(diff) < 0.15:
+        # straight
+        is_curvy = [0] + is_curvy[0:LEN_TRACEBACK-1]
+    else:
+        # curvy
+        is_curvy = [1] + is_curvy[0:LEN_TRACEBACK-1]
+
+    # output angle change, curviness, position and number of bad 
+    print((diff, is_curvy[0], positions[0], bad))
+
+    # change from curvy to straight or vice versa
+    if (sum(is_curvy[0:3]) >= 2 and sum(is_curvy[3:6]) <= 1)\
+        or (sum(is_curvy[0:3]) <= 1 and sum(is_curvy[3:6]) >= 2):
+        landmarks.append(positions[LPOS_INDEX:LEN_TRACEBACK])
+    # change from curvy to straight or vice versa, strict criterion
+    if (sum(is_curvy[0:3]) >= 3 and sum(is_curvy[3:6]) <= 0)\
+        or (sum(is_curvy[0:3]) <= 0 and sum(is_curvy[3:6]) >= 3):
+        certain_landmarks.append(positions[LPOS_INDEX:LEN_TRACEBACK])    
 
 
 def postprocess_landmarks():
@@ -429,15 +347,136 @@ def postprocess_landmarks():
     cv2.imwrite('outmed.jpg', med)
 
 
-def deinitialize():
-    print(laptimes)
-    global car
 
-    # finally, detach from memory again, stop car, quit
-    sh_mem.detach()
-    res = car.stop()
-    sleep(1)
-    del car
+
+
+
+def do_demonstration_simple():
+    if (positions[0][0] >= landmarks_data[2][0][0] and positions[1][0] <= landmarks_data[2][0][0]):
+        car.set_speed(2700, 50000)    
+    if (positions[0][0] >= landmarks_data[1][18][0] and positions[1][0] <= landmarks_data[1][18][0]):
+        car.set_speed(1220, 50000)
+    if (positions[0][0] <= landmarks_data[0][0][0] and positions[1][0] >= landmarks_data[0][0][0]):
+        car.set_speed(1900, 50000)    
+    if (positions[0][0] <= landmarks_data[3][24][0] and positions[1][0] >= landmarks_data[3][24][0]):
+        car.set_speed(1220, 50000)
+
+
+
+
+
+def compute_curvature():
+    # average the last two vectors, and the previous two vectors
+    # for each of them compute the angle of the resulting vector
+    # (we take two each to filter out noise)
+    angle_new = angle(np.sub(positions[2], positions[0]))
+    angle_old = angle(np.sub(positions[4], positions[2]))
+    # compute the difference between the angles, centered around 0
+    diff = (angle_new - angle_old + np.pi) % (2*np.pi) - np.pi
+
+    curv_list.append((positions[0], diff))
+
+
+def postprocess_curvature():
+    # TODO: smoothen these values
+
+    maxc = 0
+    minc = 0
+
+    i = 100
+    startpos = np.array(curv_list[90][0])
+    # we want to get one full loop of curvature data
+    while np.linalg.norm(pos - startpos) > 20:
+        maxc = max(maxc, curv_list[i][1])
+        minc = min(minc, curv_list[i][1])
+        i += 1
+        pos = np.array(curv_list[i][0])
+    relevant_curv = curv_list[90:i+1]
+    # TODO: write this to a file
+    print(relevant_curv)
+    print(maxc, minc)
+
+    maxabsc = max(abs(maxc), abs(minc))
+
+    # draw landmarks on the median image and save it.
+    for c in relevant_curv:
+        curv = c[1]/maxabsc
+        cv2.circle(med, (int(c[0][0]), int(c[0][1])), 5, (255-min(0,255*curv),0,255+max(0,255*curv), -1))
+
+    cv2.imwrite('outcurv.jpg', med)
+
+
+    with open('curves.dat', 'wb') as f:
+        pickle.dump(relevant_curv, f)
+
+
+
+
+
+def get_next_curvature_change():
+    cpos = np.array(positions[0])
+
+    idx = 0
+    for i in range(len(curv_data)):
+        pos = np.array(curv_data[i][0])
+        dist = np.linalg.norm(cpos - pos)
+        if dist < 50:
+            idx = i
+            break
+
+    ccurv = curv_data[idx][1]
+
+    i = idx
+    while True:
+        curv = curv_data[i][1]
+        if np.abs(ccurv - curv) > 10: # TODO: find constant
+            pos = np.array(curv_data[i][0])
+            dist = np.linalg.norm(cpos - pos)
+            return dist
+        i += 1
+        if i == len(curv_data):
+            i = 0
+        if i == idx:
+            return None
+
+
+def follow_policy():
+    global vcur
+    xpos  = positions[0][0]
+    ypos  = positions[0][1]    
+    xnew, ynew, old_curv, new_curv = get_next_curvature_change(xpos, ypos)
+
+    #vcur = TODO: compute here
+
+    dist = numpy.linalg.norm(np.array((xnew, ynew)) - np.array((xpos, ypos)))
+
+    # definition of the actual policy
+    vnew = params[2] * new_curv + params[3]
+    if (dist / vcur) < params[0] + max(0, params[1]*np.abs(vnew - vcur)):
+        # TODO: figure out the acceleration
+        car.set_speed(vnew, 50000)
+        vcur = vnew
+
+
+def update_policy(laptime):
+    global params
+    global data
+    # NOTE: instead of every lap, we could only update every few laps
+
+    data.append((params, laptime))
+    
+    # if we don't have enough data yet
+    # or sometimes stick with the current policy (exploit)
+    if len(data) < MIN_DATA or len(data) % 8 != 0:
+        # just perturb a little
+        params = np.random.normal(params, temp*param_ranges, NPARAMS)
+    else:
+        # do the linear regression here (exploit)
+        pass
+
+
+
+
 
 
 if __name__ == "__main__":
