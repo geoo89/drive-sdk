@@ -14,7 +14,7 @@ COMPUTE_LANDMARKS = 1
 LEARN = 2
 COMPUTE_CURVATURE = 3
 
-MODE = LEARN
+MODE = 2
 
 RHO    = "E6:D8:52:F1:D9:43"    # red
 BOSON  = "D9:81:41:5C:D4:31"    # blue?
@@ -75,9 +75,10 @@ if MODE == LEARN:
 
     # initial parameters
     NPARAMS = 4
-    params = np.array((0.01, 0.1, -800, 2000))
+    # -1600 = 2*800, maximum curvature is around 0.5
+    params = np.array((0.067, 1.0/5000, -1600, 2000))
     # maximum perturbation within a parameter
-    param_ranges = np.array((0.001, 0.5, 20, 50))
+    param_ranges = np.array((0.005, 1.0/50000, 20, 50))
     temp = 1.0
     vcur = 900 # TODO
 
@@ -93,8 +94,10 @@ if MODE == LEARN:
     nextpos = (0,0)
     # don't make any decisions right now
     no_decision = False
+    dnum = 0
 
-
+# 25 pixel per frame at 30 fps
+# --> speed 900 = 25*30 (750) pixels/second
 
 
 # angle between two vectors, output in [0, pi]
@@ -439,16 +442,21 @@ def get_next_curvature_change():
     while True:
         curv = curv_data[i][1]
         if np.abs(ccurv - curv) > 0.2: # TODO: find constant
+            while True:
+                i = (i + 1) % len(curv_data)
+                # still upwards trend in curvature
+                if np.abs(curv - curv_data[i][1]) > 0.07:
+                    curv = curv_data[i][1]
+                else:
+                    i -= 1
+                    break
             pos = np.array(curv_data[i][0])
             dist = np.linalg.norm(cpos - pos)
             # compute a position soon after the relevant curvature change
             nextpos = np.array(curv_data[(i+3)%len(curv_data)][0])
-            no_decision = True
-            print(cpos, pos, nextpos, dist, ccurv, curv)
+            # print(cpos, pos, nextpos, dist, ccurv, curv)
             return dist, ccurv, curv
-        i += 1
-        if i == len(curv_data):
-            i = 0
+        i = (i + 1) % len(curv_data)
         if i == idx:
             # TODO: error handling
             return None
@@ -457,6 +465,7 @@ def get_next_curvature_change():
 def follow_policy():
     global vcur
     global no_decision
+    global dnum
     xpos  = positions[0][0]
     ypos  = positions[0][1]
     pos = np.array((xpos, ypos))
@@ -470,12 +479,20 @@ def follow_policy():
         #vcur = TODO: compute here
 
         # definition of the actual policy
-        vnew = int(params[2] * new_curv + params[3])
-        print("vnew: %f, vcur: %f, dist: %f" % (vnew, vcur, dist))
-        if (dist / vcur) < params[0] + max(0, params[1]*np.abs(vnew - vcur)):
-            print("d/v = %f < %f = p0 + max(0, p1*abs(vn-vc))" % (dist / vcur, params[0] + max(0, params[1]*np.abs(vnew - vcur))))
+        vnew = int(params[2] * abs(new_curv) + params[3])
+        if (1.2*dist / vcur) < params[0] + max(0, params[1]*(vcur - vnew)):
             # TODO: figure out the acceleration
+            no_decision = True
             car.set_speed(vnew, 50000)
+            
+            # debug stuff
+            print("Decision %d. oldcurv: %f, newcurv: %f" % (dnum, old_curv, new_curv))
+            print("(x,y): (%f,%f); vnew: %f; vcur: %f; dist: %f" % (xpos, ypos, vnew, vcur, dist))
+            print("1.2*d/v = %f < %f = p0 + max(0, p1*(vn-vc))\n" % (1.2*dist / vcur, params[0] + max(0, params[1]*(vcur - vnew))))
+            cv2.circle(med, (int(xpos), int(ypos)), 5, (255,0,255,-1))
+            cv2.imwrite('decision%d.jpg' % dnum, med)
+            dnum += 1
+
             vcur = vnew
 
 
@@ -490,7 +507,8 @@ def update_policy(laptime):
     # or sometimes stick with the current policy (exploit)
     if len(data) < MIN_DATA or len(data) % 8 != 0:
         # just perturb a little
-        params = np.random.normal(params, param_ranges*temp, NPARAMS)
+        pass
+        #params = np.random.normal(params, param_ranges*temp, NPARAMS)
     else:
         # do the linear regression here (exploit)
         pass
