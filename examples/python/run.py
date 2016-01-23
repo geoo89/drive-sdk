@@ -14,6 +14,7 @@ DEMONSTRATION_SIMPLE = 0    # the normal track
 COMPUTE_LANDMARKS = 1
 LEARN = 2
 COMPUTE_CURVATURE = 3
+GET_MEDIAN_IMAGE = 4
 
 MODE = 0
 
@@ -127,25 +128,16 @@ def initialize(car_name):
     global sh_mem
     sh_mem = sysv_ipc.SharedMemory(key=192012003)
 
-    sleep(1.5)
+    sleep(0.5)
+    # TODO: insert start upon certain time
 
-
-    status = car.set_speed(900, 5000)
+    speed = 900
+    if MODE == DEMONSTRATION_SIMPLE or MODE == LEARN:
+        speed = 1220
+    status = car.set_speed(speed, 5000)
     if status:
         print "Couldn't set speed, code",  status
         raise SystemExit
-
-
-    ims = []
-    for i in range(3):
-        # obtain three different images
-        ims.append(cv2.cvtColor(np.frombuffer(sh_mem.read(1696*720*3),dtype=np.uint8).reshape(720,1696,3),cv2.COLOR_BGR2RGB))
-        sleep(0.5)
-
-    # compute the median
-    global med
-    med = np.array(ims[0])
-    np.median(np.array(ims), 0, out=med)
 
     global t_start
     t_start = time()
@@ -164,6 +156,21 @@ def deinitialize():
     res = car.stop()
     sleep(1)
     del car
+
+
+def get_median_image():
+    sleep(0.5)
+    ims = []
+    for i in range(3):
+        # obtain three different images
+        ims.append(cv2.cvtColor(np.frombuffer(sh_mem.read(1696*720*3),dtype=np.uint8).reshape(720,1696,3),cv2.COLOR_BGR2RGB))
+        sleep(0.5)
+
+    # compute the median
+    global med
+    med = np.array(ims[0])
+    np.median(np.array(ims), 0, out=med)
+    cv2.imwrite('median.jpg', med)
 
 
 def get_expected_pos():
@@ -534,37 +541,43 @@ def update_policy(laptime):
 if __name__ == "__main__":
 
     initialize(CAR_NAME)
+    
+    if MODE == GET_MEDIAN_IMAGE:
+        get_median_image()
+    else:
+        global med
+        med = cv2.imread('median.jpg')
 
-    while (True):
-        ex, ey = get_expected_pos()
-        xpos, ypos = position_from_camera(ex, ey)
+        while (True):
+            ex, ey = get_expected_pos()
+            xpos, ypos = position_from_camera(ex, ey)
 
-        # now xpos and ypos are the official positions
-        # and we can reasonably trust them to be correct
-        positions = [(xpos, ypos)] + positions[0:LEN_TRACEBACK-1]
+            # now xpos and ypos are the official positions
+            # and we can reasonably trust them to be correct
+            positions = [(xpos, ypos)] + positions[0:LEN_TRACEBACK-1]
+
+            if MODE == COMPUTE_LANDMARKS:
+                compute_landmarks()
+            if MODE == DEMONSTRATION_SIMPLE:
+                do_demonstration_simple_ccw()
+            if MODE == LEARN:
+                follow_policy()
+            if MODE == COMPUTE_CURVATURE:
+                compute_curvature()
+
+            laptime = get_laptime()
+            if laptime != None:
+                laptimes.append(laptime)
+                if MODE == LEARN:
+                    update_policy(laptime)
+            if laps == NUM_LAPS:
+                break
+            
+            sleep(0.03333)
 
         if MODE == COMPUTE_LANDMARKS:
-            compute_landmarks()
-        if MODE == DEMONSTRATION_SIMPLE:
-            do_demonstration_simple_ccw()
-        if MODE == LEARN:
-            follow_policy()
+            postprocess_landmarks()
         if MODE == COMPUTE_CURVATURE:
-            compute_curvature()
-
-        laptime = get_laptime()
-        if laptime != None:
-            laptimes.append(laptime)
-            if MODE == LEARN:
-                update_policy(laptime)
-        if laps == NUM_LAPS:
-            break
-        
-        sleep(0.03333)
-
-    if MODE == COMPUTE_LANDMARKS:
-        postprocess_landmarks()
-    if MODE == COMPUTE_CURVATURE:
-        postprocess_curvature()
+            postprocess_curvature()
 
     deinitialize()
