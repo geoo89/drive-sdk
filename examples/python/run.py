@@ -15,8 +15,9 @@ COMPUTE_LANDMARKS = 1
 LEARN = 2
 COMPUTE_CURVATURE = 3
 GET_MEDIAN_IMAGE = 4
+EXPLOIT = 5
 
-MODE = 0
+MODE = 2
 
 RHO    = "E6:D8:52:F1:D9:43"    # red
 BOSON  = "D9:81:41:5C:D4:31"    # blue?
@@ -49,6 +50,8 @@ t_lapstart = None
 laptimes = []
 # number of times we didn't find any contour
 bad = 0
+nocommand_timer = 0
+framecounter = 0
 
 if MODE == COMPUTE_LANDMARKS:
     # each landmark is a list of positions, in each list:
@@ -71,14 +74,14 @@ if MODE == COMPUTE_CURVATURE:
     #curv_data = [] # TODO: initialize
 
 
-if MODE == LEARN:
+if MODE == LEARN or MODE == EXPLOIT:
     with open('curves.dat', 'rb') as f:
         curv_data = pickle.load(f)
 
     # initial parameters
     NPARAMS = 4
     # -1600 = 2*800, maximum curvature is around 0.5
-    params = np.array((0.067, 1.0/5000, -1600, 2000))
+    params = np.array((0.067, 1.0/5000, -1600, 2200))
     # maximum perturbation within a parameter
     param_ranges = np.array((0.005, 1.0/50000, 20, 50))
     temp = 1.0
@@ -92,7 +95,7 @@ if MODE == LEARN:
     data = []
     
     # position after the relevant curvature change that warranted
-    # the previosu decition
+    # the previous decision. Until there don't make any new decisions
     nextpos = (0,0)
     # don't make any decisions right now
     no_decision = False
@@ -379,7 +382,6 @@ def do_demonstration_simple_cw():
         car.set_speed(1220, 50000)
 
 
-
 def do_demonstration_simple_ccw():
     if positions[1] != (0, 0):
         if (positions[0][0] <= landmarks_data_inv[2][0][0] and positions[1][0] >= landmarks_data_inv[2][0][0]):
@@ -443,6 +445,39 @@ def postprocess_curvature():
 
 
 
+def check_for_uturn():
+    global nocommand_timer
+    global no_decision
+    if nocommand_timer != 0 or framecounter < 15:
+        return
+    
+    minindex = 0
+    mindist = 999999.0
+    for i in range(len(curv_data)):
+        dist = np.linalg.norm(curv_data[i][0] - np.array(positions[0]))
+        if dist < mindist:
+            mindist = dist
+            minindex = i
+
+    minindex2 = 0
+    mindist2 = 999999.0
+    for i in range(len(curv_data)):
+        dist = np.linalg.norm(curv_data[i][0] - np.array(positions[12]))
+        if dist < mindist2:
+            mindist2 = dist
+            minindex2 = i
+    
+    if (minindex - minindex2) % len(curv_data) < len(curv_data) // 2:
+        car.uturn()
+        print("uturn issued")
+        nocommand_timer = 30
+        no_decision = False
+        
+    
+
+
+
+
 
 def get_next_curvature_change():
     global nextpos
@@ -485,6 +520,7 @@ def get_next_curvature_change():
 def follow_policy():
     global vcur
     global no_decision
+    global nocommand_timer
     global dnum
     xpos  = positions[0][0]
     ypos  = positions[0][1]
@@ -492,7 +528,7 @@ def follow_policy():
     if np.linalg.norm(nextpos - pos) < 20:
         no_decision = False
     
-    if not no_decision:
+    if not no_decision and nocommand_timer == 0:
     
         dist, old_curv, new_curv = get_next_curvature_change()
 
@@ -504,6 +540,7 @@ def follow_policy():
             # TODO: figure out the acceleration
             no_decision = True
             car.set_speed(vnew, 50000)
+            nocommand_timer = 6
             
             # debug stuff
             print("Decision %d. oldcurv: %f, newcurv: %f" % (dnum, old_curv, new_curv))
@@ -522,6 +559,7 @@ def update_policy(laptime):
     # NOTE: instead of every lap, we could only update every few laps
 
     data.append((params, laptime))
+    print((params, laptime))
     
     # if we don't have enough data yet
     # or sometimes stick with the current policy (exploit)
@@ -546,6 +584,7 @@ if __name__ == "__main__":
         get_median_image()
     else:
         global med
+        global framecounter
         med = cv2.imread('median.jpg')
 
         while (True):
@@ -560,8 +599,9 @@ if __name__ == "__main__":
                 compute_landmarks()
             if MODE == DEMONSTRATION_SIMPLE:
                 do_demonstration_simple_ccw()
-            if MODE == LEARN:
+            if MODE == LEARN or MODE == EXPLOIT:
                 follow_policy()
+                check_for_uturn()
             if MODE == COMPUTE_CURVATURE:
                 compute_curvature()
 
@@ -574,6 +614,9 @@ if __name__ == "__main__":
                 break
             
             sleep(0.03333)
+            if nocommand_timer != 0:
+                nocommand_timer -= 1
+            framecounter += 1
 
         if MODE == COMPUTE_LANDMARKS:
             postprocess_landmarks()
