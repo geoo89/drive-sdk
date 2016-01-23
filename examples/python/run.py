@@ -29,7 +29,7 @@ HADION = "D4:48:49:03:98:95"    # orange
 CAR_NAME = KOURAI
 
 # number of laps before quitting
-NUM_LAPS = 7
+NUM_LAPS = 100
 
 BRIGHTNESS_THRESHOLD = 96
 
@@ -81,13 +81,14 @@ if MODE == LEARN or MODE == EXPLOIT:
     # initial parameters
     NPARAMS = 4
     # -1600 = 2*800, maximum curvature is around 0.5
-    params = np.array((0.067, 1.0/5000, -1600, 2200))
+    params = np.array((0.167, 1.0/5000, -1600, 1600))
+    params_base = params
     # maximum perturbation within a parameter
-    param_ranges = np.array((0.005, 1.0/50000, 20, 50))
+    param_ranges = np.array((0.005, 1.0/50000, 50, 200))
     temp = 1.0
     vcur = 900 # TODO
 
-    MIN_DATA = 10
+    MIN_DATA = 8
     # contains pairs:
     #   first element is the set of 4 parameters
     #   second element is the time taken with this policy
@@ -214,7 +215,7 @@ def position_from_camera(expected_x, expected_y):
     if hierarchy == None:
         # no contours found at all
         print("No car found, using prediction")
-        cv2.imwrite('out%s.jpg' % bad, im)
+        # cv2.imwrite('out%s.jpg' % bad, im)
         bad = (bad + 1) % MAX_IMAGES
         # use expected position if no car found
         xpos = expected_x
@@ -467,7 +468,7 @@ def check_for_uturn():
             mindist2 = dist
             minindex2 = i
     
-    if (minindex - minindex2) % len(curv_data) < len(curv_data) // 2:
+    if (minindex - minindex2) % len(curv_data) > len(curv_data) // 2:
         car.uturn()
         print("uturn issued")
         nocommand_timer = 30
@@ -555,6 +556,7 @@ def follow_policy():
 
 def update_policy(laptime):
     global params
+    global params_base
     global data
     # NOTE: instead of every lap, we could only update every few laps
 
@@ -563,13 +565,40 @@ def update_policy(laptime):
     
     # if we don't have enough data yet
     # or sometimes stick with the current policy (exploit)
-    if len(data) < MIN_DATA or len(data) % 8 != 0:
+    if len(data) < MIN_DATA:
         # just perturb a little
-        pass
-        #params = np.random.normal(params, param_ranges*temp, NPARAMS)
+        params = np.random.normal(params_base, param_ranges*temp, NPARAMS)
     else:
-        # do the linear regression here (exploit)
-        pass
+        # do the linear regression here (explore)
+        print(data)
+        X = np.array([[1.0] + list(data[i][0]) for i in range(len(data))])
+        y = np.array([data[i][1] for i in range(len(data))])
+        print(X)
+        print(y)
+        a, stuff1, stuff2, stuff3 = np.linalg.lstsq(X, y)
+        print(a)
+        u0 = np.array([a[1], a[2], a[3], a[4], -1]) # normal vector
+        u1 = np.array([-a[2], a[1], 0, 0, 0])
+        u2 = np.array([0, -a[3], a[2], 0, 0])
+        u3 = np.array([0, 0, -a[4], a[3], 0])
+        u4 = np.array([0, 0, 0,     1, a[4]])
+        
+        A = np.transpose(np.array([u0, u1, u2, u3, u4]))
+        q, r = np.linalg.qr(A)
+        d = np.transpose(q)[4]
+        print("reality check:")
+        print(d)
+        print(a[1] * d[0] +  a[2] * d[1] + a[3] * d[2] + a[4] * d[3] - d[4], -a[0])
+        
+        # now scale this guy proportional to its last component which is the time gain
+        # achieved if we just add the normalized vector. 
+        # So lower time = less gain = we want to move less
+        dp = a[0:4]*a[4]
+        params_base += dp
+        data = []
+        print("Done linear regression, new params: " + str(params_base))
+        
+        
 
 
 
