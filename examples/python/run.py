@@ -1,6 +1,7 @@
 from anki import *
 from landmarks import *
 from landmarks25 import *
+from landmarks_inv import *
 
 import sysv_ipc
 import numpy as np
@@ -14,7 +15,7 @@ COMPUTE_LANDMARKS = 1
 LEARN = 2
 COMPUTE_CURVATURE = 3
 
-MODE = 2
+MODE = 0
 
 RHO    = "E6:D8:52:F1:D9:43"    # red
 BOSON  = "D9:81:41:5C:D4:31"    # blue?
@@ -26,7 +27,7 @@ HADION = "D4:48:49:03:98:95"    # orange
 CAR_NAME = KOURAI
 
 # number of laps before quitting
-NUM_LAPS = 5
+NUM_LAPS = 7
 
 BRIGHTNESS_THRESHOLD = 96
 
@@ -287,11 +288,11 @@ def get_laptime():
     global t_lapstart
     global laps
 
-    if ypos < STARTY and xpos >= STARTX and old_x < STARTX:
+    if ypos < STARTY and xpos <= STARTX and old_x > STARTX:
         #interpolate linearly to determine the actual time when crossing the line
         dx = xpos - old_x
         v = float(dx)/dt
-        x_excess = xpos - STARTX
+        x_excess = -(xpos - STARTX)
         t_excess = x_excess / v
         t_adjusted = t_end - t_excess
         laptime = t_adjusted - t_lapstart       
@@ -360,16 +361,28 @@ def postprocess_landmarks():
 
 
 
-def do_demonstration_simple():
+def do_demonstration_simple_cw():
     if (positions[0][0] >= landmarks_data[2][0][0] and positions[1][0] <= landmarks_data[2][0][0]):
-        car.set_speed(2700, 50000)    
+        car.set_speed(2700, 50000)
     if (positions[0][0] >= landmarks_data[1][18][0] and positions[1][0] <= landmarks_data[1][18][0]):
         car.set_speed(1220, 50000)
     if (positions[0][0] <= landmarks_data[0][0][0] and positions[1][0] >= landmarks_data[0][0][0]):
-        car.set_speed(1900, 50000)    
+        car.set_speed(1900, 50000)
     if (positions[0][0] <= landmarks_data[3][24][0] and positions[1][0] >= landmarks_data[3][24][0]):
         car.set_speed(1220, 50000)
 
+
+
+def do_demonstration_simple_ccw():
+    if positions[1] != (0, 0):
+        if (positions[0][0] <= landmarks_data_inv[2][0][0] and positions[1][0] >= landmarks_data_inv[2][0][0]):
+            car.set_speed(2700, 5000)
+        if (positions[0][0] <= landmarks_data_inv[3][18][0] and positions[1][0] >= landmarks_data_inv[3][18][0]):
+            car.set_speed(1220, 5000)
+        if (positions[0][0] >= landmarks_data_inv[1][0][0] and positions[1][0] <= landmarks_data_inv[1][0][0]):
+            car.set_speed(1900, 5000)
+        if (positions[0][0] >= landmarks_data_inv[0][13][0] and positions[1][0] <= landmarks_data_inv[0][13][0]):
+            car.set_speed(1220, 5000)
 
 
 
@@ -533,7 +546,7 @@ if __name__ == "__main__":
         if MODE == COMPUTE_LANDMARKS:
             compute_landmarks()
         if MODE == DEMONSTRATION_SIMPLE:
-            do_demonstration_simple()
+            do_demonstration_simple_ccw()
         if MODE == LEARN:
             follow_policy()
         if MODE == COMPUTE_CURVATURE:
