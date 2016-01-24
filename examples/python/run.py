@@ -81,7 +81,7 @@ if MODE == LEARN or MODE == EXPLOIT:
     # initial parameters
     NPARAMS = 4
     # -1600 = 2*800, maximum curvature is around 0.5
-    params = np.array((0.167, 1.0/5000, -1600, 1600))
+    params = np.array((0.167, 1.0/5000, -1600, 2000))
     params_base = params
     # maximum perturbation within a parameter
     param_ranges = np.array((0.005, 1.0/50000, 50, 120))
@@ -148,8 +148,6 @@ def initialize(car_name):
     t_start = time()
     global t_lapstart
     t_lapstart = t_start
-
-    #car.change_lane(-100, 100, -1000)
 
 
 def deinitialize():
@@ -470,6 +468,7 @@ def check_for_uturn():
             minindex2 = i
     
     if (minindex - minindex2) % len(curv_data) > len(curv_data) // 2:
+        car.cancel_change_lane()
         car.uturn()
         print("uturn issued")
         nocommand_timer = 30
@@ -477,6 +476,23 @@ def check_for_uturn():
         
     
 
+def check_for_changelane():
+    global nocommand_timer
+    if nocommand_timer != 0 or framecounter < 15:
+        return
+    
+    minindex = 0
+    mindist = 999999.0
+    for i in range(len(curv_data)):
+        dist = np.linalg.norm(curv_data[i][0] - np.array(positions[0]))
+        if dist < mindist:
+            mindist = dist
+            minindex = i
+    
+    if mindist > 36:
+        car.cancel_change_lane()
+        car.change_lane(-100, 100, -1000)
+        nocommand_timer = 12
 
 
 
@@ -545,6 +561,7 @@ def follow_policy():
         if (1.2*dist / vcur) < params[0] + max(0, params[1]*(vcur - vnew)):
             # TODO: figure out the acceleration
             #no_decision = True
+            car.cancel_change_lane()
             car.set_speed(vnew, 50000)
             nocommand_timer = max(8, int(index_dist * 900.0 / vnew + 0.5))
             
@@ -636,6 +653,7 @@ if __name__ == "__main__":
             if MODE == LEARN or MODE == EXPLOIT:
                 follow_policy()
                 check_for_uturn()
+                check_for_changelane()
             if MODE == COMPUTE_CURVATURE:
                 compute_curvature()
 
