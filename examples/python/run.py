@@ -18,7 +18,7 @@ COMPUTE_CURVATURE = 3
 GET_MEDIAN_IMAGE = 4
 EXPLOIT = 5
 
-MODE = 2
+MODE = 0
 
 RHO    = "E6:D8:52:F1:D9:43"    # red
 BOSON  = "D9:81:41:5C:D4:31"    # blue?
@@ -30,7 +30,7 @@ HADION = "D4:48:49:03:98:95"    # orange
 CAR_NAME = KOURAI
 
 # number of laps before quitting
-NUM_LAPS = 100
+NUM_LAPS = 12
 
 BRIGHTNESS_THRESHOLD = 96
 
@@ -103,6 +103,7 @@ if MODE == LEARN or MODE == EXPLOIT:
     # don't make any decisions right now
     no_decision = False
     dnum = 0
+    besttime = 999999.9
 
 # 25 pixel per frame at 30 fps
 # --> speed 900 = 25*30 (750) pixels/second
@@ -164,6 +165,7 @@ def initialize(car_name):
 
 def deinitialize():
     print(laptimes)
+    print(sum(laptimes) / len(laptimes))
     global car
 
     # finally, detach from memory again, stop car, quit
@@ -258,7 +260,7 @@ def position_from_camera(expected_x, expected_y):
         if homology_cars >= 2:
             # TODO: What happens if we find two cars?
             # This is rare, but take the one clostest to expect position?
-            cv2.imwrite('out%s.jpg' % bad, im)
+            #cv2.imwrite('out%s.jpg' % bad, im)
             bad = (bad + 1) % MAX_IMAGES
             
         if homology_cars == 0:
@@ -287,7 +289,7 @@ def position_from_camera(expected_x, expected_y):
                     found = True
             if found == False:
                 print("No sensible alternative found, using prediction")
-                cv2.imwrite('out%s.jpg' % bad, im)
+                #cv2.imwrite('out%s.jpg' % bad, im)
                 bad = (bad + 1) % MAX_IMAGES
 
     return xpos, ypos
@@ -319,13 +321,14 @@ def get_laptime():
         t_adjusted = t_end - t_excess
         laptime = t_adjusted - t_lapstart       
 
-        # in the top half of the track and just traversed from the left half to the right half
-        print("Lap complete!    %f seconds\n" % laptime)
-        t_lapstart = t_adjusted
-        laps += 1
-        if laps > 1:
-            # don't record the incomplete lap
-            return laptime
+        if laptime > 2.0:
+            # in the top half of the track and just traversed from the left half to the right half
+            print("Lap complete!    %f seconds\n" % laptime)
+            t_lapstart = t_adjusted
+            laps += 1
+            if laps > 1:
+                # don't record the incomplete lap
+                return laptime
 
     return None
 
@@ -592,47 +595,63 @@ def update_policy(laptime):
     global params
     global params_base
     global data
+    global besttime
     # NOTE: instead of every lap, we could only update every few laps
 
     data.append((params, laptime))
     print((params, laptime))
     
-    # if we don't have enough data yet
-    if len(data) < MIN_DATA:
+    
+    gradient_descent_works = False
+    if gradient_descent_works:
+        # if we don't have enough data yet
+        if len(data) < MIN_DATA:
+            # just perturb a little
+            params = np.random.normal(params_base, param_ranges*temp, NPARAMS)
+        else:
+            # do the linear regression here (explore)
+            print(data)
+            X = np.array([[1.0] + list(data[i][0]) for i in range(len(data))])
+            y = np.array([data[i][1] for i in range(len(data))])
+            print(X)
+            print(y)
+            a, stuff1, stuff2, stuff3 = np.linalg.lstsq(X, y)
+            print(a)
+            u0 = np.array([a[1], a[2], a[3], a[4], -1]) # normal vector
+            u1 = np.array([-a[2], a[1], 0, 0, 0])
+            u2 = np.array([0, -a[3], a[2], 0, 0])
+            u3 = np.array([0, 0, -a[4], a[3], 0])
+            u4 = np.array([0, 0, 0,     1, a[4]])
+            
+            A = np.transpose(np.array([u0, u1, u2, u3, u4]))
+            q, r = np.linalg.qr(A)
+            print(np.transpose(q))
+            d = np.transpose(q)[4]
+            print("reality check:")
+            print(d)
+            print(a[1] * d[0] +  a[2] * d[1] + a[3] * d[2] + a[4] * d[3] - d[4], -a[0])
+            
+            # now scale this guy proportional to its last component which is the time gain
+            # achieved if we just add the normalized vector. 
+            # So lower time = less gain = we want to move less
+            dp = d[0:4]*(-1000*d[4])
+            params_base += dp
+            data = []
+            print("Done linear regression, new params: " + str(params_base))
+    else:
+        # if we don't have enough data yet
+        if laps % 3 == 0 and laps > 1:
+            times = [d[1] for d in data]
+            avgtime = sum(times) / len(times)
+            if avgtime < besttime:
+                params_base = params
+                besttime = avgtime
+                print("better params found")
+            data = []
+            print((params_base, besttime))
+
         # just perturb a little
         params = np.random.normal(params_base, param_ranges*temp, NPARAMS)
-    else:
-        # do the linear regression here (explore)
-        print(data)
-        X = np.array([[1.0] + list(data[i][0]) for i in range(len(data))])
-        y = np.array([data[i][1] for i in range(len(data))])
-        print(X)
-        print(y)
-        a, stuff1, stuff2, stuff3 = np.linalg.lstsq(X, y)
-        print(a)
-        u0 = np.array([a[1], a[2], a[3], a[4], -1]) # normal vector
-        u1 = np.array([-a[2], a[1], 0, 0, 0])
-        u2 = np.array([0, -a[3], a[2], 0, 0])
-        u3 = np.array([0, 0, -a[4], a[3], 0])
-        u4 = np.array([0, 0, 0,     1, a[4]])
-        
-        A = np.transpose(np.array([u0, u1, u2, u3, u4]))
-        q, r = np.linalg.qr(A)
-        print(np.transpose(q))
-        d = np.transpose(q)[4]
-        print("reality check:")
-        print(d)
-        print(a[1] * d[0] +  a[2] * d[1] + a[3] * d[2] + a[4] * d[3] - d[4], -a[0])
-        
-        # now scale this guy proportional to its last component which is the time gain
-        # achieved if we just add the normalized vector. 
-        # So lower time = less gain = we want to move less
-        dp = d[0:4]*(-1000*d[4])
-        params_base += dp
-        data = []
-        print("Done linear regression, new params: " + str(params_base))
-        
-        
 
 
 
