@@ -84,11 +84,11 @@ if MODE == LEARN or MODE == EXPLOIT:
     params = np.array((0.167, 1.0/5000, -1600, 1600))
     params_base = params
     # maximum perturbation within a parameter
-    param_ranges = np.array((0.005, 1.0/50000, 50, 200))
+    param_ranges = np.array((0.005, 1.0/50000, 50, 120))
     temp = 1.0
     vcur = 900 # TODO
 
-    MIN_DATA = 8
+    MIN_DATA = 15
     # contains pairs:
     #   first element is the set of 4 parameters
     #   second element is the time taken with this policy
@@ -98,6 +98,7 @@ if MODE == LEARN or MODE == EXPLOIT:
     # position after the relevant curvature change that warranted
     # the previous decision. Until there don't make any new decisions
     nextpos = (0,0)
+    index_dist = 0
     # don't make any decisions right now
     no_decision = False
     dnum = 0
@@ -482,6 +483,7 @@ def check_for_uturn():
 
 def get_next_curvature_change():
     global nextpos
+    global index_dist
     cpos = np.array(positions[0])
 
     idx = 0
@@ -509,7 +511,9 @@ def get_next_curvature_change():
             pos = np.array(curv_data[i][0])
             dist = np.linalg.norm(cpos - pos)
             # compute a position soon after the relevant curvature change
-            nextpos = np.array(curv_data[(i+3)%len(curv_data)][0])
+            nextposid = (i+3)%len(curv_data)
+            nextpos = np.array(curv_data[nextposid][0])
+            index_dist = abs(idx - nextposid)
             # print(cpos, pos, nextpos, dist, ccurv, curv)
             return dist, ccurv, curv
         i = (i + 1) % len(curv_data)
@@ -526,8 +530,9 @@ def follow_policy():
     xpos  = positions[0][0]
     ypos  = positions[0][1]
     pos = np.array((xpos, ypos))
-    if np.linalg.norm(nextpos - pos) < 20:
-        no_decision = False
+
+    #if np.linalg.norm(nextpos - pos) < 20:
+    #    no_decision = False
     
     if not no_decision and nocommand_timer == 0:
     
@@ -539,16 +544,16 @@ def follow_policy():
         vnew = int(params[2] * abs(new_curv) + params[3])
         if (1.2*dist / vcur) < params[0] + max(0, params[1]*(vcur - vnew)):
             # TODO: figure out the acceleration
-            no_decision = True
+            #no_decision = True
             car.set_speed(vnew, 50000)
-            nocommand_timer = 6
+            nocommand_timer = max(8, int(index_dist * 900.0 / vnew + 0.5))
             
             # debug stuff
-            print("Decision %d. oldcurv: %f, newcurv: %f" % (dnum, old_curv, new_curv))
-            print("(x,y): (%f,%f); vnew: %f; vcur: %f; dist: %f" % (xpos, ypos, vnew, vcur, dist))
-            print("1.2*d/v = %f < %f = p0 + max(0, p1*(vn-vc))\n" % (1.2*dist / vcur, params[0] + max(0, params[1]*(vcur - vnew))))
-            cv2.circle(med, (int(xpos), int(ypos)), 5, (255,0,255,-1))
-            cv2.imwrite('decision%d.jpg' % dnum, med)
+            #print("Decision %d. oldcurv: %f, newcurv: %f" % (dnum, old_curv, new_curv))
+            #print("(x,y): (%f,%f); vnew: %f; vcur: %f; dist: %f" % (xpos, ypos, vnew, vcur, dist))
+            #print("1.2*d/v = %f < %f = p0 + max(0, p1*(vn-vc))\n" % (1.2*dist / vcur, params[0] + max(0, params[1]*(vcur - vnew))))
+            #cv2.circle(med, (int(xpos), int(ypos)), 5, (255,0,255,-1))
+            #cv2.imwrite('decision%d.jpg' % dnum, med)
             dnum += 1
 
             vcur = vnew
@@ -564,7 +569,6 @@ def update_policy(laptime):
     print((params, laptime))
     
     # if we don't have enough data yet
-    # or sometimes stick with the current policy (exploit)
     if len(data) < MIN_DATA:
         # just perturb a little
         params = np.random.normal(params_base, param_ranges*temp, NPARAMS)
@@ -585,6 +589,7 @@ def update_policy(laptime):
         
         A = np.transpose(np.array([u0, u1, u2, u3, u4]))
         q, r = np.linalg.qr(A)
+        print(np.transpose(q))
         d = np.transpose(q)[4]
         print("reality check:")
         print(d)
@@ -593,7 +598,7 @@ def update_policy(laptime):
         # now scale this guy proportional to its last component which is the time gain
         # achieved if we just add the normalized vector. 
         # So lower time = less gain = we want to move less
-        dp = a[0:4]*a[4]
+        dp = d[0:4]*(-1000*d[4])
         params_base += dp
         data = []
         print("Done linear regression, new params: " + str(params_base))
