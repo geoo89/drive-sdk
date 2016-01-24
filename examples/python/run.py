@@ -4,9 +4,10 @@ from landmarks25 import *
 from landmarks_inv import *
 
 import sysv_ipc
+import sys
 import numpy as np
 import cv2
-from time import sleep,time
+import time
 import pickle
 
 # modes -- would be much cleaner to use subclasses here...
@@ -117,7 +118,7 @@ def dprint(text):
     #print(text)
 
 
-def initialize(car_name):
+def initialize(car_name):        
     global car
     car = Car(car_name)
     if not car:
@@ -133,8 +134,19 @@ def initialize(car_name):
     global sh_mem
     sh_mem = sysv_ipc.SharedMemory(key=192012003)
 
-    sleep(0.5)
+    time.sleep(0.5)
     # TODO: insert start upon certain time
+
+    if len(sys.argv) > 1:
+        tl = time.localtime()
+        time_string = time.strftime("%Y%m%d", tl)
+        user_input = sys.argv[1]
+        ts = time_string + user_input
+        starttime = time.strptime(ts, "%Y%m%d%H%M%S")
+        
+        while time.localtime() < starttime:
+            time.sleep(0.01)
+    
 
     speed = 900
     if MODE == DEMONSTRATION_SIMPLE or MODE == LEARN:
@@ -145,7 +157,7 @@ def initialize(car_name):
         raise SystemExit
 
     global t_start
-    t_start = time()
+    t_start = time.time()
     global t_lapstart
     t_lapstart = t_start
 
@@ -157,17 +169,17 @@ def deinitialize():
     # finally, detach from memory again, stop car, quit
     sh_mem.detach()
     res = car.stop()
-    sleep(1)
+    time.sleep(1)
     del car
 
 
 def get_median_image():
-    sleep(0.5)
+    time.sleep(0.5)
     ims = []
     for i in range(3):
         # obtain three different images
         ims.append(cv2.cvtColor(np.frombuffer(sh_mem.read(1696*720*3),dtype=np.uint8).reshape(720,1696,3),cv2.COLOR_BGR2RGB))
-        sleep(0.5)
+        time.sleep(0.5)
 
     # compute the median
     global med
@@ -290,7 +302,7 @@ def get_laptime():
     ypos  = positions[0][1]
     old_x = positions[1][0]
 
-    t_end = time()
+    t_end = time.time()
     dt = t_end - t_start
     dprint("Elapsed time:    %f seconds\n" % dt)
     global t_start
@@ -665,7 +677,7 @@ if __name__ == "__main__":
             if laps == NUM_LAPS:
                 break
             
-            sleep(0.03333)
+            time.sleep(0.03333)
             if nocommand_timer != 0:
                 nocommand_timer -= 1
             framecounter += 1
