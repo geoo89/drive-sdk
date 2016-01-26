@@ -17,8 +17,16 @@ LEARN = 2
 COMPUTE_CURVATURE = 3
 GET_MEDIAN_IMAGE = 4
 EXPLOIT = 5
+RACE = 6
+GET_MEDIAN_IMAGE_SIMPLE = 7
 
-MODE = 0
+MODE = 2
+
+LOOP = 0 # change to inner lane
+BOTTLENECK = 1
+CROSSOVER = 2
+
+TRACK = BOTTLENECK
 
 RHO    = "E6:D8:52:F1:D9:43"    # red
 BOSON  = "D9:81:41:5C:D4:31"    # blue?
@@ -30,7 +38,9 @@ HADION = "D4:48:49:03:98:95"    # orange
 CAR_NAME = KOURAI
 
 # number of laps before quitting
-NUM_LAPS = 12
+NUM_LAPS = 50
+if MODE == COMPUTE_LANDMARKS or MODE == COMPUTE_CURVATURE:
+    NUM_LAPS = 5
 
 BRIGHTNESS_THRESHOLD = 96
 
@@ -75,17 +85,24 @@ if MODE == COMPUTE_CURVATURE:
     #curv_data = [] # TODO: initialize
 
 
-if MODE == LEARN or MODE == EXPLOIT:
+if MODE == LEARN or MODE == EXPLOIT or MODE == RACE:
     with open('curves.dat', 'rb') as f:
         curv_data = pickle.load(f)
 
     # initial parameters
     NPARAMS = 4
     # -1600 = 2*800, maximum curvature is around 0.5
-    params = np.array((0.167, 1.0/5000, -1600, 2000))
+    params = np.array((0.167, 1.0/5000, -1600, 1800))
+    besttime = 3.4
+    if TRACK == BOTTLENECK:
+        # params that the car learnt
+        params = np.array([  1.66655689e-01, 1.79933195e-04, -1.55578872e+03, 1.85075644e+03])
+        besttime = 4.396027445793152
+
+
     params_base = params
     # maximum perturbation within a parameter
-    param_ranges = np.array((0.005, 1.0/50000, 50, 120))
+    param_ranges = np.array((0.005, 1.0/50000, 50, 100))
     temp = 1.0
     vcur = 900 # TODO
 
@@ -103,7 +120,6 @@ if MODE == LEARN or MODE == EXPLOIT:
     # don't make any decisions right now
     no_decision = False
     dnum = 0
-    besttime = 999999.9
 
 # 25 pixel per frame at 30 fps
 # --> speed 900 = 25*30 (750) pixels/second
@@ -173,6 +189,11 @@ def deinitialize():
     res = car.stop()
     time.sleep(1)
     del car
+
+
+def get_median_image_simple():
+    im = cv2.cvtColor(np.frombuffer(sh_mem.read(1696*720*3),dtype=np.uint8).reshape(720,1696,3),cv2.COLOR_BGR2RGB)
+    cv2.imwrite('median.jpg', im)
 
 
 def get_median_image():
@@ -298,7 +319,10 @@ def position_from_camera(expected_x, expected_y):
 def get_laptime():
     # xposition of the starting line, and y position determining upper half of track
     STARTX = 1696/2
-    STARTY = 720/2
+    STARTY = 720/2+100
+    if TRACK == BOTTLENECK:
+        STARTY = 720/2+100
+
 
     xpos  = positions[0][0]
     ypos  = positions[0][1]
@@ -448,7 +472,7 @@ def postprocess_curvature():
 
     # draw landmarks on the median image and save it.
     for c in relevant_curv:
-        curv = c[1]/maxabsc
+        curv = abs(c[1]/maxabsc)
         cv2.circle(med, (int(c[0][0]), int(c[0][1])), 5, (255+min(0,255*curv),0,255-max(0,255*curv), -1))
 
     cv2.imwrite('outcurv.jpg', med)
@@ -640,7 +664,7 @@ def update_policy(laptime):
             print("Done linear regression, new params: " + str(params_base))
     else:
         # if we don't have enough data yet
-        if laps % 3 == 0 and laps > 1:
+        if laps % 4 == 0 and laps > 1:
             times = [d[1] for d in data]
             avgtime = sum(times) / len(times)
             if avgtime < besttime:
@@ -650,8 +674,10 @@ def update_policy(laptime):
             data = []
             print((params_base, besttime))
 
-        # just perturb a little
-        params = np.random.normal(params_base, param_ranges*temp, NPARAMS)
+            # just perturb a little
+            params = np.random.normal(params_base, param_ranges*temp, NPARAMS)
+        
+        #TODO: if strat is really bad, then don't try 4 full laps
 
 
 
@@ -662,7 +688,9 @@ if __name__ == "__main__":
 
     initialize(CAR_NAME)
     
-    if MODE == GET_MEDIAN_IMAGE:
+    if MODE == GET_MEDIAN_IMAGE_SIMPLE:
+        get_median_image_simple()
+    elif MODE == GET_MEDIAN_IMAGE:
         get_median_image()
     else:
         global med
@@ -681,10 +709,14 @@ if __name__ == "__main__":
                 compute_landmarks()
             if MODE == DEMONSTRATION_SIMPLE:
                 do_demonstration_simple_ccw()
+            if MODE == RACE:
+                do_demonstration_simple_ccw()
+                check_for_uturn()
             if MODE == LEARN or MODE == EXPLOIT:
                 follow_policy()
                 check_for_uturn()
-                check_for_changelane()
+                if TRACK == LOOP:
+                    check_for_changelane()
             if MODE == COMPUTE_CURVATURE:
                 compute_curvature()
 
